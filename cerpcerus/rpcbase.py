@@ -493,7 +493,7 @@ class RPCBase(SimpleProtocol):
 
 class GenericRPCSSLContextFactory(ssl.ContextFactory):
 
-    def __init__(self, public_key, private_key, verify_ca=True, tls_version=SSL.TLSv1_METHOD):
+    def __init__(self, public_key, private_key, verify_ca=True, tls_version=SSL.TLSv1_METHOD, cipher_string="HIGH"):
         """public_key and private_key are paths to certificate files
         when verify_ca is true:
             self signed certs are not allowed. A list of valid CA files can be given with 'valid_ca_cert_files'.
@@ -510,7 +510,8 @@ class GenericRPCSSLContextFactory(ssl.ContextFactory):
         self.ctx = SSL.Context(self.tls_version)
         self.ctx.use_certificate_file(self.public_key)
         self.ctx.use_privatekey_file(self.private_key)
-
+        
+        self.ctx.set_cipher_list(cipher_string)
         self.ctx.set_verify(SSL.VERIFY_PEER | SSL.VERIFY_FAIL_IF_NO_PEER_CERT, self.verify_callback) #must be called or client does not send certificate at all
         #self.ctx.set_verify_depth(0) #does not change that 'verify_callback' is called twice, why? maybe it's called for every error until ok
 
