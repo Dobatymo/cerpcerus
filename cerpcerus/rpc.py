@@ -17,7 +17,7 @@ class RPCNotAClass(TypeError):
     pass
 class RPCInvalidArguments(TypeError):
     pass
-class NotAuthenticated(StandardError):
+class NotAuthenticated(Exception):
     pass
 
 class RPCUserError(int): #could be raised by functions in rpc service and returns a (self.ERROR, USERERROR, int)

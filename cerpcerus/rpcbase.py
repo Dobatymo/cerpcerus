@@ -4,7 +4,7 @@ import logging
 from functools import partial
 
 import msgpack
-from OpenSSL import SSL, crypto
+from OpenSSL import SSL, crypto, __version__ as pyopenssl_version
 from twisted.internet import ssl, defer, error
 
 from simple_protocol import SimpleProtocol
@@ -13,10 +13,10 @@ from rpc import Seq, RemoteObject, RemoteInstance, RPCAttributeError, RPCInvalid
 
 logger = logging.getLogger(__name__)
 
-class RPCError(StandardError):
+class RPCError(Exception):
     """Signals a general rpc error"""
 
-class NetworkError(StandardError):
+class NetworkError(Exception):
     """Signals a general rpc network error"""
 
 class ConnectionLost(NetworkError):
@@ -493,14 +493,15 @@ class RPCBase(SimpleProtocol):
 
 class GenericRPCSSLContextFactory(ssl.ContextFactory):
 
-    def __init__(self, public_key, private_key, verify_ca=True, tls_version=SSL.TLSv1_METHOD, cipher_string="HIGH"):
+    def __init__(self, public_key, private_key, verify_ca=True, tls_version=SSL.TLSv1_2_METHOD, cipher_string="HIGH"):
         """public_key and private_key are paths to certificate files
-        when verify_ca is true:
+        if verify_ca is true:
             self signed certs are not allowed. A list of valid CA files can be given with 'valid_ca_cert_files'.
             this list can contain the certificates itself for selfsigned ceritifacates
         else:
             self signed certs are allowed.
-        tls_version: can be SSL.SSLv2_METHOD, SSLv3_METHOD, SSLv23_METHOD or SSL.TLSv1_METHOD (default and recommended)
+        tls_version: can be SSL.SSLv2_METHOD, SSL.SSLv3_METHOD, SSL.SSLv23_METHOD, SSL.TLSv1_METHOD, SSL.TLSv1_1_METHOD, SSL.TLSv1_2_METHOD (depending on pyOpenSSL version)
+        cipher_string: see https://www.openssl.org/docs/apps/ciphers.html
         """
         self.public_key = public_key
         self.private_key = private_key
@@ -518,7 +519,11 @@ class GenericRPCSSLContextFactory(ssl.ContextFactory):
         if self.verify_ca:
             for pubkeyfile in self.valid_ca_cert_files():
                 try:
-                    self.ctx.load_verify_locations(pubkeyfile) #authenticate client public key
+                    #authenticate client public key
+                    if pyopenssl_version == "0.14":
+                        self.ctx.load_verify_locations(pubkeyfile.encode("utf-8")) #encode("utf-8") fixes pyopenssl-0.14
+                    else:
+                        self.ctx.load_verify_locations(pubkeyfile)
                     logger.debug("Authorised '{}'".format(pubkeyfile))
                 except SSL.Error as e:
                     logger.debug("Authorising '{}' failed".format(pubkeyfile))
@@ -569,3 +574,5 @@ class IPAddr(object):
         if other == None:
             return False
         return self.ip == other.ip and self.port == other.port
+
+    __hash__ = object.__hash__ #needed in py3 because of __eq__ override
