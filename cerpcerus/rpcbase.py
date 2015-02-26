@@ -25,34 +25,39 @@ class ConnectionLost(NetworkError):
 class EndAnswer(Exception):
     """Used for flow control like StopIteration."""
 
+class UnknownPeer(Exception):
+    """Raised by Friends if peer name is not known"""
+
 class IFriends(object):
 
     """Interface which defines all methods which friend classes must implement"""
 
-    def key_to_name(self, public_key):
+    def identify(self, public_key): # was: key_to_name
+        """return name for key, raise on unknown key"""
+        raise NotImplementedError()
+
+    def establish_connection(self, name, conn): # was: update_connection_by_name
+        """called when connection is successful"""
+
+    def reset_connection(self, name, conn):
+        """called on connection lost, should invalidate/delete connection object"""
+
+    def start_connecting(self, name, deferred):
+        """called by client to set connection progress deferred"""
+        logger.debug("to {}: {}".format(name, deferred))
+
+    def reset_connecting(self, name, deferred):
+        """called by client, when connecting done or failed"""
+        logger.debug("to {}: {}".format(name, deferred))
+
+    def get_connection(self, name): # was: get_by_name
+        """used by client to see if connection was established from the other side"""
+        raise NotImplementedError()
+
+    def set_addr(self, name, addr): # was: update_addr_by_name
         raise NotImplementedError()
 
     def update_by_addr(self, addr, conn): #used?
-        raise NotImplementedError()
-
-    ### needed for sure, below
-
-    def set_connecting(self, name, deferred):
-        raise NotImplementedError()
-
-    def get_by_name(self, name):
-        raise NotImplementedError()
-
-    def reset_connection(self, name):
-        raise NotImplementedError()
-
-    def reset_connecting(self, name):
-        raise NotImplementedError()
-
-    def update_connection_by_name(self, name, conn):
-        raise NotImplementedError()
-
-    def update_addr_by_name(self, name, addr):
         raise NotImplementedError()
 
 class SameFriend(IFriends):
@@ -64,17 +69,17 @@ class SameFriend(IFriends):
     def __init__(self, name):
         self.name = name
 
-    def key_to_name(self, public_key):
+    def identify(self, public_key):
         return self.name
+
+    def get_connection(self, name):
+        return None
 
     def update_by_addr(self, addr, conn):
         pass
 
-    def set_connecting(self, name, deferred):
+    def set_addr(self, name, addr):
         pass
-
-    def get_by_name(self, name):
-        return (None, None, None)
 
 class AllFriends(IFriends):
 
@@ -86,32 +91,20 @@ class AllFriends(IFriends):
         self.friends = {}
         self.seq = Seq(0)
 
-    def key_to_name(self, public_key):
+    def identify(self, public_key):
         try:
             return self.friends[public_key]
         except KeyError:
             self.friends[public_key] = self.seq.next()
             return self.friends[public_key]
 
+    def get_connection(self, name):
+        return None
+
     def update_by_addr(self, addr, conn):
         pass
 
-    def set_connecting(self, name, deferred):
-        pass
-
-    def reset_connection(self, name):
-        pass
-
-    def reset_connecting(self, name):
-        pass
-
-    def get_by_name(self, name):
-        return (None, None, None)
-
-    def update_connection_by_name(self, name, conn):
-        pass
-
-    def update_addr_by_name(self, name, addr):
+    def set_addr(self, name, addr):
         pass
 
 #Decorator to avoid c&p
@@ -153,6 +146,7 @@ class RPCBase(SimpleProtocol):
     connids = Seq(0)
 
     def __init__(self, friends):
+        SimpleProtocol.__init__(self)
         self.connid = self.connids.next()
         self._sequid = Seq(0) #was static/class var before
         self.friends = friends
@@ -187,9 +181,9 @@ class RPCBase(SimpleProtocol):
                 logger.info("Connection to {} lost: {}".format(self.name, reason.getErrorMessage()))
 
             self.authed = False
-            self.friends.reset_connection(self.name)
+            self.friends.reset_connection(self.name, RemoteObject(self))
 
-            self.service._deleteAllObjects(self.connid)
+            self.service._deleteAllObjects(self.connid) # makes use by other peers impossible
 
             if reason.check(error.ConnectionDone):
                 for sequid, (deferred, answers, __) in self._deferreds.iteritems(): #untested
@@ -205,19 +199,14 @@ class RPCBase(SimpleProtocol):
             assert len(self._deferreds) == 0
         self.closed = True
 
-    def authenticated(self, name, key):
+    def authenticate(self, pubkey):
         self.authed = True
-        self.friends.update_addr_by_name(name, self.addr) #bad: sets outgoing instead of incoming  port / overwrites existings addr of possibly currently established connection
-        self.friends.update_connection_by_name(name, RemoteObject(self)) # overwrites existings connection
-        logger.debug("Connection accepted: {} is now {}".format(self.addr, name))
+        self.authenticated(pubkey)
+        logger.debug("Connection accepted: {} is now {}".format(self.addr, self.name))
         self.service._OnAuthenticated() #use RemoteObject(self) as argument?
 
-    def authenticatedFromClient(self, name, key):
-        self.authed = True
-        self.friends.update_connection_by_name(name, RemoteObject(self)) # overwrites existings connection
-        self.friends.reset_connecting(name)
-        logger.debug("Connection accepted: {} is now {}".format(self.addr, name))
-        self.service._OnAuthenticated() #use RemoteObject(self) as argument?
+    def authenticated(self, key):
+        pass
 
     ### msgpack hooks
 
@@ -242,7 +231,7 @@ class RPCBase(SimpleProtocol):
             #msg = msgpack.loads(data, use_list=False, encoding="utf-8") #encoding might create problems with raw data
             msg = msgpack.loads(data, use_list=False, ext_hook=self.ext_hook)
             self.recv_msgpack(msg)
-        elif self.name == None and data == b"": #because there is no SSLconnectionMade function
+        elif self.name is None and data == b"": #because there is no SSLconnectionMade function
             peer_x509 = self.transport.getPeerCertificate()
             if not peer_x509:
                 logger.warning("Peer did not send a certificate")
@@ -251,14 +240,13 @@ class RPCBase(SimpleProtocol):
             peer_pubkey = crypto.dump_privatekey(crypto.FILETYPE_ASN1, peer_x509.get_pubkey())
 
             try:
-                self.name = self.friends.key_to_name(peer_pubkey)
-                #assert conn == None
-            except KeyError:
+                self.name = self.friends.identify(peer_pubkey)
+            except UnknownPeer:
                 logger.warning("Connection denied (not in friends list)")
                 logger.debug(cert_info(peer_x509))
                 self.transport.loseConnection()
                 return
-            self.authenticated(self.name, peer_pubkey)
+            self.authenticate(peer_pubkey)
         else:
             if not data:
                 logger.warning("Received zero length message")
@@ -292,7 +280,7 @@ class RPCBase(SimpleProtocol):
                         self.service._call(self.connid, name, *args, **kwargs)
                     except RPCAttributeError as e:
                         logger.debug("No Such Function {}".format(name))
-                    except TypeError as e: #this is caught even if it is thrown inside the function, instead of while calling the funtion
+                    except TypeError as e: # this is caught even if it is thrown inside the function, instead of while calling the funtion
                         logger.exception("Wrong Arguments")
                     except Exception as e:
                         logger.exception("RPC {}({}) failed".format(name, args_str(args, kwargs)))
@@ -310,7 +298,7 @@ class RPCBase(SimpleProtocol):
                         logger.debug("Invalid Object {}".format(objectid))
                     except RPCAttributeError as e:
                         logger.debug("No Such Method {}".format(name))
-                    except TypeError as e: #this is caught even if it is thrown inside the function, instead of while calling the funtion
+                    except TypeError as e: # this is caught even if it is thrown inside the function, instead of while calling the funtion
                         logger.exception("Wrong Arguments")
                     except Exception as e:
                         logger.exception("RPC {}({}) failed".format(name, args_str(args, kwargs)))
@@ -322,7 +310,7 @@ class RPCBase(SimpleProtocol):
 
                 logger.debug("calling local {}({}) [{}]".format(name, args_str(args, kwargs), sequid))
                 if self.service:
-                    #if name.startswith("_") check not needed. Service does that and raises AttributeError
+                    #if name.startswith("_") check not needed. Service does that and raises RPCAttributeError
                     try:
                         result = self.service._call(self.connid, name, *args, **kwargs)
                         #use maybeDeferred ??
@@ -370,7 +358,7 @@ class RPCBase(SimpleProtocol):
                     except RPCAttributeError as e:
                         msg = (self.ERROR, sequid, self.ERRORS.NoSuchFunction)
                         logger.debug("No Such Method {} [{}]".format(name, sequid))
-                    except TypeError as e: #this is caught even if it is thrown inside the function, instead of while calling the funtion
+                    except TypeError as e: # this is caught even if it is thrown inside the function, instead of while calling the funtion
                         msg = (self.ERROR, sequid, self.ERRORS.WrongArguments)
                         logger.exception("Wrong Arguments [{}]".format(sequid))
                     except Exception as e:
@@ -497,7 +485,7 @@ class GenericRPCSSLContextFactory(ssl.ContextFactory):
         """public_key and private_key are paths to certificate files
         if verify_ca is true:
             self signed certs are not allowed. A list of valid CA files can be given with 'valid_ca_cert_files'.
-            this list can contain the certificates itself for selfsigned ceritifacates
+            this list can contain the certificates itself for selfsigned certificates
         else:
             self signed certs are allowed.
         tls_version: can be SSL.SSLv2_METHOD, SSL.SSLv3_METHOD, SSL.SSLv23_METHOD, SSL.TLSv1_METHOD, SSL.TLSv1_1_METHOD, SSL.TLSv1_2_METHOD (depending on pyOpenSSL version)
@@ -511,10 +499,9 @@ class GenericRPCSSLContextFactory(ssl.ContextFactory):
         self.ctx = SSL.Context(self.tls_version)
         self.ctx.use_certificate_file(self.public_key)
         self.ctx.use_privatekey_file(self.private_key)
-        
+
         self.ctx.set_cipher_list(cipher_string)
         self.ctx.set_verify(SSL.VERIFY_PEER | SSL.VERIFY_FAIL_IF_NO_PEER_CERT, self.verify_callback) #must be called or client does not send certificate at all
-        #self.ctx.set_verify_depth(0) #does not change that 'verify_callback' is called twice, why? maybe it's called for every error until ok
 
         if self.verify_ca:
             for pubkeyfile in self.valid_ca_cert_files():
@@ -537,13 +524,13 @@ class GenericRPCSSLContextFactory(ssl.ContextFactory):
         raise NotImplementedError()
 
     def verify_callback(self, connection, x509, errnum, errdepth, ok):
-        """Is called to verify a certificate.
+        """Is called to verify a certificate. (is called for every error and certificate in chain)
         return True to indicate a valid
         return False to indicate an invalid certificate.
         """
         #see https://www.openssl.org/docs/apps/verify.html#DIAGNOSTICS for error codes
         if not ok:
-            if not self.verify_ca and errnum == 18: #X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT
+            if not self.verify_ca and errnum == 18: #X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT, X509_V_ERR_SELF_SIGNED_CERT_IN_CHAIN??
                 logger.info("Allowing self signed certificate from peer: {!s}".format(x509.get_subject()))
                 return True
             else:
@@ -571,7 +558,7 @@ class IPAddr(object):
         return iter((self.ip, self.port))
 
     def __eq__(self, other):
-        if other == None:
+        if other is None:
             return False
         return self.ip == other.ip and self.port == other.port
 

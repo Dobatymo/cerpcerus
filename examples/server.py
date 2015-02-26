@@ -42,7 +42,7 @@ class MySSLContextFactory(cerpcerus.GenericRPCSSLContextFactory):
 
 logging.basicConfig(level=logging.DEBUG, format="%(levelname)s\t%(name)s\t%(funcName)s\t%(message)s")
 
-service = cerpcerus.SeperatedService(TestService, reactor)
+service = cerpcerus.SeparatedService(TestService, reactor)
 ssl = MySSLContextFactory()
 
 cerpcerus.Server(reactor, 1337, ssl, service, interface = "127.0.0.1")

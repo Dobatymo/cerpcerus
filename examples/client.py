@@ -31,11 +31,11 @@ def Task():
     yield conn.remote(calc1)
 
     print(yield dir(calc1))
-    yield conn._loose()
     
-    """while True:
-        result = yield conn.Echo("asd")
-        print(result)"""
+    while True:
+        result = yield conn.Echo("0123456789"*100000)
+        #print(result)
+    yield conn._loose()
     reactor.callLater(1, Stop)
 
 def Stop(*args):

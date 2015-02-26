@@ -11,7 +11,10 @@ logger = logging.getLogger(__name__)
 
 class RPCServer(RPCBase):
     """Server specialisation of RPCBase"""
-    pass
+
+    def authenticated(self, key):
+        self.friends.set_addr(self.name, self.addr) #bad: sets outgoing instead of incoming  port / overwrites existings addr of possibly currently established connection
+        self.friends.establish_connection(self.name, RemoteObject(self)) # overwrites existings connection
 
 class RPCServerFactory(ServerFactory):
     """Factory needed for Twisted. Uses a service factory to present a service to peers"""

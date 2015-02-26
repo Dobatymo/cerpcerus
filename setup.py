@@ -7,6 +7,8 @@ setup(name="cerpcerus",
       author="Hazzard",
       license="GPL",
       packages=["cerpcerus"],
+      test_suite="tests",
       install_requires=["twisted", "msgpack-python", "pyOpenSSL"],
+      use_2to3=True,
       zip_safe=True
 )

@@ -5,26 +5,31 @@ from itertools import chain
 import inspect, copy, warnings
 
 import logging #debug
-logger = logging.getLogger(__name__) #debug
+logger = logging.getLogger(__name__) # debug
 
-from utils import log_methodcall_decorator #only needed for development
+from utils import log_methodcall_decorator # only needed for development
 
 class RPCAttributeError(AttributeError):
-    pass
-class RPCInvalidObject(RuntimeError):
-    pass
-class RPCNotAClass(TypeError):
-    pass
-class RPCInvalidArguments(TypeError):
-    pass
-class NotAuthenticated(Exception):
-    pass
+    """Raised if method access is not allowed. For internal use."""
 
-class RPCUserError(int): #could be raised by functions in rpc service and returns a (self.ERROR, USERERROR, int)
-    pass
+class RPCInvalidObject(RuntimeError):
+    """Raised if an invalid object is accessed. For internal use."""
+
+class RPCInvalidArguments(TypeError):
+    """Raised if method is accessed with invalid arguments. For internal use."""
+    
+class NotAuthenticated(Exception):
+    """Raised if method is called on object, whose connection
+    is not yet or not anymore athenticated."""
+
+class RPCNotAClass(TypeError):
+    """Not used yet."""
+
+class RPCUserError(int):
+    """Not used yet. Could be raised by functions in rpc service and returns a (self.ERROR, USERERROR, int)"""
 
 class ObjectId(int):
-    pass
+    """Wrapper to pass around object references"""
 
 class Seq:
     """A sequence class. Used to abstract something like i+=1 for unique ids."""
@@ -32,6 +37,7 @@ class Seq:
         self.state = state
 
     def next(self):
+        """Call to set and return next state."""
         self.state += 1
         return self.state
 
@@ -46,17 +52,17 @@ class CallAnyPublic(object):
     def __dir__(self):
         raise NotImplementedError("No introspection available")
 
-    def _callpublic(self, name, *args, **kwargs): #*args etc needed?
+    def _callpublic(self, name):
         raise NotImplementedError()
 
-    def _callprivate(self, name, *args, **kwargs):
+    def _callprivate(self, name):
         raise NotImplementedError()
 
 class RemoteObjectGeneric(CallAnyPublic):
 
     """Generic proxy class for remote network objects."""
 
-    #__getattr__ from CallAnyPublic is not called, if attibute is defined in this class
+    # __getattr__ from CallAnyPublic is not called, if attibute is defined in this class
 
     def __init__(self, conn):
         self._conn = conn
@@ -72,23 +78,26 @@ class RemoteObjectGeneric(CallAnyPublic):
         del self._alias[key]"""
 
     def _callpublic(self, name):
-        try:
-            name = self._alias[name]
-        except KeyError:
-            pass
-        return partial(self._call, name)
+        return partial(self._call, self._alias.get(name, name))
 
-    def _callprivate(self, name, *args, **kwargs):
-        if name == "_connid":
-            return self._conn.connid
-        if name == "_name":
-            return self._conn.name
-        elif name == "_addr":
-            return self._conn.addr
-        elif name == "_service":
-            return self._conn.service
-        else:
-            raise AttributeError("{} instance has no attribute '{}'".format(type(self).__name__, name)) #don't use RPCAttributeError, because this exception is exposed to the user
+    def _callprivate(self, name):
+        raise AttributeError("{} instance has no attribute '{}'".format(type(self).__name__, name)) # don't use RPCAttributeError, because this exception is exposed to the user
+
+    @property
+    def _connid(self):
+        return self._conn.connid
+        
+    @property
+    def _name(self):
+        return self._conn.name
+        
+    @property
+    def _addr(self):
+        return self._conn.addr
+        
+    @property
+    def _service(self):
+        return self._conn.service
 
     def _loose(self):
         self._conn.softDisconnect()
@@ -165,20 +174,20 @@ class RemoteInstance(RemoteObjectGeneric):
         except NotAuthenticated:
             pass
 
-def cast(object, class_, instanceof=object, *args, **kwargs):
+def cast(object_, class_, instanceof=object, *args, **kwargs):
     """Changes the class of 'object' to class_ if object is an instance of 'instanceof' calls the constructor and returns it"""
-    object = copy.copy(object)
-    if isinstance(object, instanceof):
-        object.__class__ = class_
-        object.__init__(*args, **kwargs)
+    object_ = copy.copy(object_)
+    if isinstance(object_, instanceof):
+        object_.__class__ = class_
+        object_.__init__(*args, **kwargs)
     else:
-        raise TypeError("Object is not of type {}".format(class_.__name__))
-    return object
+        raise TypeError("Object is not an instance of {}".format(instanceof.__name__))
+    return object_
 
 class NotifyRemoteObject(RemoteObject):
     """Notifies methods instead of calls"""
     def __init__(self):
-        """__init__ of super class is no called by design"""
+        """__init__ of super class is not called by design"""
 
     def _call(self, name, *args, **kwargs):
         self._notify(name, *args, **kwargs)
@@ -188,8 +197,10 @@ class NotifyRemoteObject(RemoteObject):
 
 class MultiRemoteObject(RemoteObject):
 
+    """Can be used to set the number of expected answers in RemoteObject"""
+
     def __init__(self, answers):
-        """__init__ of super class is no called by design"""
+        """__init__ of super class is not called by design"""
         self.answers = answers
 
     def __repr__(self):
@@ -202,7 +213,8 @@ Multi = partial(cast, class_=MultiRemoteObject, instanceof=RemoteObject)
 class RPCTimeout(Queue.Empty): pass
 class BlockRemoteObjectQueue(RemoteObject):
 
-    def __init__(self, timeout = None):
+    def __init__(self, reactor, timeout=None):
+        self._reactor = reactor
         self._timeout = timeout
 
     def _call(self, name, *args, **kwargs):
@@ -226,7 +238,6 @@ class BlockRemoteObjectQueue(RemoteObject):
         self._queue.put((None, failure))
 
 from twisted.internet import defer
-import logging
 class BlockRemoteObjectInlineCallback(RemoteObject):
 
     def __init__(self, timeout = None):
@@ -247,22 +258,37 @@ class BlockRemoteObjectInlineCallback(RemoteObject):
 Block = partial(Cast, class_ = BlockRemoteObjectQueue, instanceof = RemoteObject)
 Block = partial(Cast, class_ = BlockRemoteObjectInlineCallback, instanceof = RemoteObject)"""
 def Block(obj):
-    raise Exception("Use defer.inlineCallbacks for that in your function")
+    raise Exception("Use 'defer.inlineCallbacks' or 'threads.blockingCallFromThread' for that in your function")
+
+"""
+def expose(func):
+    "Decorator to set exposed flag on a function."
+    func._exposed = True
+    return func
+
+def is_exposed(func):
+    "Test whether another function should be publicly exposed."
+    return getattr(func, "_exposed", False)
+"""
 
 class Service(object):
     """Baseclass used for RPC Services
-    Dont forget to call Service.__init__(self, introspection) in your contstructor
+    Don't forget to call Service.__init__(self, introspection) in your constructor
     if you don't have a constructor:
         the 'introspection' argument might be exposed to the remote user of the class
     if you do:
         Service is not properly initialized and will lack certain features"""
 
-    def __init__(self, introspection=False):
-        """introspection (bool): allows user to remotely call introspection functions"""
+    _alias = {}
+
+    def __init__(self, introspection=False, allow_foreign_access=False):
+        """introspection (bool): allows user to remotely call introspection functions
+        allow_foreign_access (bool): allow access to objects created by other connections"""
+
         self._objects = {}
         self._objectids = Seq(0)
-        self._alias = {}
-        
+        self._allow_foreign_access = allow_foreign_access
+
         if introspection:
             self.introspect = self._introspect
             self.aliases = self._aliases
@@ -276,9 +302,17 @@ class Service(object):
     def __delitem__(self, key):
         del self._alias[key]"""
 
+    @classmethod
+    def _aliases(cls, aliases):
+        def decorator(func):
+            for alias in aliases:
+                cls._alias[alias] = func.__name__
+            return func
+        return decorator
+
     def _introspect(self):
-        """returns (classes, methods, functions) with signatures
-        does not take exposed aliases for private functions into account"""
+        """Returns (classes, methods, functions) with signatures.
+        Does not take exposed aliases for private functions into account."""
 
         classes = []
         methods = []
@@ -308,6 +342,7 @@ class Service(object):
         return self._alias
 
     def _call(self, connid, name, *args, **kwargs):
+        """Dispatches calls on service based on name and type."""
         if not name.startswith("_"):
             try:
                 try:
@@ -318,12 +353,11 @@ class Service(object):
                     logging.exception("Maybe 'myrpc.Service.__init__' was not called within service")
                 attr = getattr(self, name)
             except AttributeError as e:
-                
                 raise RPCAttributeError(e)
 
-            #don't differentiate between CALL and NEWINSTANCE
-            #decide on called attribute NOT on result, because if would get to powerful otherwise,
-            #because every function could (by accident) return any valid object (like rpyc)
+            # don't differentiate between CALL and NEWINSTANCE
+            # decide on called attribute NOT on result, because it would get to powerful otherwise,
+            # because every function could (by accident) return any valid object (like rpyc)
 
             if inspect.isclass(attr):
                 objectid = self._objectids.next()
@@ -335,28 +369,33 @@ class Service(object):
             raise RPCAttributeError("{} instance has no attribute '{}'".format(type(self).__name__, name))
 
     def _callmethod(self, connid, objectid, name, *args, **kwargs):
+        """Calls method on objects, created by _call()."""
         try:
-            obj, connid_ = self._objects[objectid] #todo: check if connid == connid_
+            obj, connid_ = self._objects[objectid]
+            if not self._allow_foreign_access and connid != connid_: # untested security feature
+                raise KeyError
         except KeyError:
             raise RPCInvalidObject("No object with id {}".format(objectid))
         except AttributeError:
             logging.exception("Maybe 'myrpc.Service.__init__' was not called within service")
-        return obj._call(connid, name, *args, **kwargs) #if this fails with AttributeError: Not inherited from Service?
+        return obj._call(connid, name, *args, **kwargs) # if this fails with AttributeError: Not inherited from Service?
 
     def _delete(self, connid, objectid):
+        """Deletes object created by _call."""
         try:
-            del self._objects[objectid]
+            del self._objects[objectid] # compare connid?
         except KeyError:
             raise RPCInvalidObject("No object with id {}".format(objectid))
 
     def _deleteAllObjects(self, connid):
-        self._objects = {oid:(obj, connid_) for oid, (obj, connid_) in self._objects.iteritems() if connid_ != connid}
+        """Deletes all objects created by this connection."""
+        self._objects = {oid: (obj, connid_) for oid, (obj, connid_) in self._objects.iteritems() if connid_ != connid}
 
-    def _OnConnect(self): #why doesn't it have 'conn' as argument?
+    def _OnConnect(self): # why doesn't it have 'conn' as argument?
         """Is called when a new connection to the service is established"""
         pass
 
-    def _OnAuthenticated(self): #why doesn't it have 'pubkey' as argument?
+    def _OnAuthenticated(self): # why doesn't it have 'pubkey' as argument?
         """Is called when the connection to the service is authenticated"""
         pass
 
@@ -370,7 +409,6 @@ class Service(object):
 
 class VoidService(Service):
     """Service which does nothing"""
-    pass
 
 """class SubServices(Service):
 
@@ -428,7 +466,7 @@ class SharedUpdatedService(ServiceFactory):
         self.service.build(*args, **kwargs)
         return self.service
 
-class SeperatedService(ServiceFactory):
+class SeparatedService(ServiceFactory):
     """Service factory which builds a new service for each connections."""
     def __init__(self, service, *args, **kwargs):
         self.service = service
@@ -451,37 +489,3 @@ class SeperatedService(ServiceFactory):
         for name, service in self.services.iteritems():
             service._AddService(service, name)
 """
-
-if __name__ == "__main__":
-    #Some stupid tests...
-
-    #c = CallAnyPublic()
-    #c._asd()
-
-    class CallAny(CallAnyPublic):
-
-        def _private(self, num):
-            raise NotImplementedError()
-
-    class TestObject(CallAny):
-
-        publicattr = 1
-        _privateattr = 1
-
-        def _callpublic(self, name):
-            return self.public(1)
-
-        def _callprivate(self, name, *args, **kwargs):
-            raise RPCAttributeError("{} instance has no attribute '{}'".format(type(self).__name__, name))
-
-        def public(self, num):
-            print("public: {}".format(num))
-
-        def _private(self, num):
-            print("private: {}".format(num))
-
-    t = TestObject()
-    print(t.publicattr)
-    print(t._privateattr)
-    t.public(0)
-    t._private(0)

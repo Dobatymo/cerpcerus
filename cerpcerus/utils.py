@@ -14,6 +14,16 @@ def log_methodcall_decorator(func):
         return func(self, *args, **kwargs)
     return decorator
 
+def log_methodcall_result(func):
+    @functools.wraps(func)
+    def decorator(self, *args, **kwargs):
+        logging.debug("{}.{}({})".format(self.__class__.__name__, func.__name__, args_str(args, kwargs))) #type(self).__name__ ?
+        #logging.debug(self.__class__.__name__ + "\n" + "\n".join(map(lambda x: " : ".join(map(str, x)), traceback.extract_stack())))
+        res = func(self, *args, **kwargs)
+        logging.debug("{}.{} => {}".format(self.__class__.__name__, func.__name__, res)) #type(self).__name__ ?
+        return res
+    return decorator
+
 def cert_info(cert):
     return "Subject: {}, Issuer: {}, Serial Number: {}, Version: {}".format(cert.get_subject().commonName, cert.get_issuer().commonName, cert.get_serial_number(), cert.get_version())
 
