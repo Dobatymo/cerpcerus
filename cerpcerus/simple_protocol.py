@@ -31,7 +31,7 @@ class SimpleProtocol(Protocol):
         self._pos = 0
         #logging.debug("len(data): {}, pos: {}, length {}".format(len(data), self._pos, self._length))
         while len(data) >= self._pos + self._length - len(self._buffer):
-            if self._buf_len is None: #if not self._buf_len doesnt permit 0
+            if self._buf_len is None: #if not self._buf_len doesn't permit 0
                 #logging.debug("int:buf_len: {}".format(self._buf_len))
                 missing = self._int_len - len(self._buffer)
                 #logging.debug("int:missing: {}".format(missing))

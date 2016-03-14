@@ -107,7 +107,7 @@ class AllFriends(IFriends):
     def set_addr(self, name, addr):
         pass
 
-#Decorator to avoid c&p
+#Decorator to avoid copy&paste
 def ValidateConnection(func):
     def check(self, *args, **kwargs):
         if self.authed:

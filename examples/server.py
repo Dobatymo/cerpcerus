@@ -6,7 +6,7 @@ import cerpcerus
 class TestService(cerpcerus.Service):
     def __init__(self, reactor, conn):
         cerpcerus.Service.__init__(self, True)
-        self.reactor = reactor
+        self.reactor = reactor #reactor and conn: security problem?
         self.conn = conn #use _OnConnect for conn
 
     def Echo(self, str):

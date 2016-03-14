@@ -1,4 +1,4 @@
-from __future__ import unicode_literals
+from __future__ import unicode_literals, absolute_import
 
 from functools import partial
 from itertools import chain
@@ -7,7 +7,8 @@ import inspect, copy, warnings
 import logging #debug
 logger = logging.getLogger(__name__) # debug
 
-from utils import log_methodcall_decorator # only needed for development
+from .utils import log_methodcall_decorator # only needed for development
+from . import __modulename__
 
 class RPCAttributeError(AttributeError):
     """Raised if method access is not allowed. For internal use."""
@@ -350,7 +351,7 @@ class Service(object):
                 except KeyError:
                     pass
                 except AttributeError:
-                    logging.exception("Maybe 'myrpc.Service.__init__' was not called within service")
+                    logging.exception("Maybe '{}.Service.__init__' was not called within service".format(__modulename__))
                 attr = getattr(self, name)
             except AttributeError as e:
                 raise RPCAttributeError(e)
@@ -377,7 +378,7 @@ class Service(object):
         except KeyError:
             raise RPCInvalidObject("No object with id {}".format(objectid))
         except AttributeError:
-            logging.exception("Maybe 'myrpc.Service.__init__' was not called within service")
+            logging.exception("Maybe '{}.Service.__init__' was not called within service".format(__modulename__))
         return obj._call(connid, name, *args, **kwargs) # if this fails with AttributeError: Not inherited from Service?
 
     def _delete(self, connid, objectid):
@@ -389,7 +390,10 @@ class Service(object):
 
     def _deleteAllObjects(self, connid):
         """Deletes all objects created by this connection."""
-        self._objects = {oid: (obj, connid_) for oid, (obj, connid_) in self._objects.iteritems() if connid_ != connid}
+        try:
+            self._objects = {oid: (obj, connid_) for oid, (obj, connid_) in self._objects.iteritems() if connid_ != connid}
+        except AttributeError:
+            logging.exception("Maybe '{}.Service.__init__' was not called within service".format(__modulename__))
 
     def _OnConnect(self): # why doesn't it have 'conn' as argument?
         """Is called when a new connection to the service is established"""
@@ -459,6 +463,7 @@ class SharedService(ServiceFactory):
         return self.service
 
 class SharedUpdatedService(ServiceFactory):
+    """Service factory which uses the same service for all connection but calls build method for each new connection"""
     def __init__(self, service, *args, **kwargs):
         self.service = service(*args, **kwargs)
 
