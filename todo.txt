@@ -1,1 +1,0 @@
-allow/disallow introspection_functions()

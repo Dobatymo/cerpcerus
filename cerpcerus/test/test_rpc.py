@@ -2,7 +2,7 @@ import unittest
 
 from cerpcerus.rpc import CallAnyPublic, RPCAttributeError
 
-class TestRPC(unittest.TestCase):
+class RPCTestCase(unittest.TestCase):
 
     class TestObject(CallAnyPublic):
 
@@ -31,6 +31,3 @@ class TestRPC(unittest.TestCase):
         self.assertEqual(t.public(), True)
         with self.assertRaises(RPCAttributeError):
             t._private()
-
-if __name__ == '__main__':
-    unittest.main()
