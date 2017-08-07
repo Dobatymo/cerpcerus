@@ -3,6 +3,8 @@ import queue, logging
 from twisted.internet import defer, reactor, protocol, interfaces
 from utils import sleep
 
+logger = logging.getLogger(__name__)
+
 """
 call self.transport.pauseProducing() and self.transport.resumeProducing() if stream is sending too fast (queue gets too large
 """
@@ -51,22 +53,21 @@ class MultiDeferredIterator:
 	def callback(self, val): # called multiple times
 		#self.transport.pauseProducing() # if queue too full
 		if self.deferred and not self.deferred.called:
-			logging.debug("call directly")
+			#logger.debug("call directly")
 			self.deferred.callback(val)
 		else:
-			logging.debug("add to queue")
+			#logger.debug("add to queue")
 			self.queue.put_nowait(defer.succeed(val))
 
 	def errback(self, val):
 		if self.deferred and not self.deferred.called:
-			logging.debug("call error directly")
+			#logger.debug("call error directly")
 			self.deferred.errback(val)
 		else:
-			logging.debug("add error to queue")
+			#logger.debug("add error to queue")
 			self.queue.put_nowait(defer.fail(val))
 
 	def completed(self):
-		logging.debug("queued stop")
 		return self.errback(StopIteration())
 
 """ py 3 only

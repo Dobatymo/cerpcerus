@@ -1,3 +1,4 @@
+from __future__ import absolute_import, unicode_literals
 import sys, logging
 from twisted.internet import reactor, defer
 
@@ -21,17 +22,28 @@ class TestService(cerpcerus.DebugService):
 			yield echo
 
 	@defer.inlineCallbacks
-	def print_stream(self, stream):
+	def print_stream(self, ret, stream):
 		for result in stream:
 			try:
 				res = yield result
 				print("Stream", res)
+				yield sleep(0.1)
 			except StopIteration:
 				break
 			except Exception as e:
 				print("something went wrong: {}".format(e))
+				#break?
 
-		return True
+		print("end of print_stream")
+		# return True # python3 only
+		defer.returnValue(ret)
+
+	""" does not work yet
+	@cerpcerus.bidirectionalStream # reimplements inlineCallbacks with the possibility to yield values (to call MultiDeferredIterator or something like that)
+	def echo_stream(self, stream):
+		# yield from stream
+		pass
+	"""
 
 	class Calc(cerpcerus.Service):
 		def __init__(self, num):

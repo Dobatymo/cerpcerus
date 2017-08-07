@@ -1,4 +1,4 @@
-from __future__ import print_function, absolute_import
+from __future__ import absolute_import, unicode_literals, print_function
 
 import sys, logging
 from twisted.internet import reactor, defer
@@ -56,12 +56,18 @@ def Task():
 			break
 		except Exception as e:
 			print("something went wrong: {}".format(e))
+			#break?
 
-	def range(x):
-		yield from range(x)
+	def gen_range(x):
+		#yield from range(x) # python3 only
+		for i in range(x):
+			yield i
 
-	res = yield conn._call_with_streams("print_stream", range(3))
-	print(res)
+	try:
+		res = yield conn._call_with_streams("print_stream", 1337, gen_range(3)).addTimeout(5, reactor)
+		assert res == 1337
+	except defer.TimeoutError:
+		print("Error: Timed out after 5 seconds")
 
 	#while False:
 	#	result = yield conn.echo("0123456789"*100000)

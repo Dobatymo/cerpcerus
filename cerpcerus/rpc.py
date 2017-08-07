@@ -1,4 +1,4 @@
-from __future__ import unicode_literals, absolute_import
+from __future__ import absolute_import, unicode_literals
 
 from functools import partial
 from itertools import chain
@@ -125,15 +125,19 @@ class RemoteObject(RemoteObjectGeneric):
 		self._answers = 1
 
 	def _call(self, _name, *args, **kwargs):
+		_name = unicode(_name)
 		return self._conn._call(_name, self._answers, *args, **kwargs) # type: RemoteResultDeferred
 
 	def _call_with_streams(self, _name, *args, **kwargs):
+		_name = unicode(_name)
 		return self._conn._call_with_streams(_name, *args, **kwargs) # type: RemoteResultDeferred
 
 	def _notify(self, _name, *args, **kwargs):
+		_name = unicode(_name)
 		self._conn._notify(_name, *args, **kwargs) # type: None
 
 	def _stream(self, _name, *args, **kwargs): # could return a async iterator in the far future
+		_name = unicode(_name)
 		return self._conn._stream(_name, *args, **kwargs) # type: MultiDeferredIterator
 
 	def __repr__(self):
