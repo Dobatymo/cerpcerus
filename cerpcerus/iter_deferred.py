@@ -1,7 +1,6 @@
 import queue, logging
 
-from twisted.internet import defer, reactor, protocol, interfaces
-from utils import sleep
+from twisted.internet import defer, reactor, protocol
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +13,7 @@ class MultiDeferredIterator:
 	"""should this be made pause/resume-able?
 	should be stoppable for sure
 	maybe the stream should include information if it can be paused
-	
+
 	if this stops the producer/transport, it will be stopped for all streams.
 	It would be better to have on collector with one queue for all streams, so it can be stopped with regard to all streams.
 	if every single iterator can pause/resume, there will be nterference among them
@@ -111,57 +110,61 @@ class AsyncMultiDeferredIterator:
 
 async def async_recv_stream(async_iter):
 	print("start")
-	async for d in async_iter:
-		print(d)
+	async for deferred in async_iter:
+		print(deferred)
 	print("end")
 	return True
 """
 
+from .utils import sleep
+
 @defer.inlineCallbacks
 def recv_stream(async_iter):
-	for d in async_iter:
+	for deferred in async_iter:
 		try:
-			result = yield d
+			result = yield deferred
 			print(result)
 		except StopIteration:
 			print("stop")
 			break
-		except:
-			logging.exception("in recv")
+		except GeneratorExit:
+			logging.exception("GeneratorExit in recv")
+		except Exception:
+			logging.exception("Exception in recv")
 		yield sleep(1)
 		print("slept for a second")
 	reactor.stop()
 
 class Recv(protocol.Protocol):
 
-	def __init__(self, it):
-		self.it = it
+	def __init__(self, mdit):
+		self.mdit = mdit
 
 	def dataReceived(self, data):
 		if data == b"\x1b": # ESCAPE in TELNET
-			self.it.stop()
+			self.mdit.stop()
 		else:
-			self.it.callback(data)
+			self.mdit.callback(data)
 
 class RecvFactory(protocol.Factory):
 
-	def __init__(self, it):
-		self.it = it
+	def __init__(self, mdit):
+		self.mdit = mdit
 
 	def buildProtocol(self, addr):
-		return Recv(self.it)
+		return Recv(self.mdit)
 
 def main1():
-	it = MultiDeferredIterator()
-	reactor.listenTCP(8000, RecvFactory(it))
-	reactor.callWhenRunning(recv_stream, it)
+	mdit = MultiDeferredIterator()
+	reactor.listenTCP(8000, RecvFactory(mdit))
+	reactor.callWhenRunning(recv_stream, mdit)
 	reactor.run()
 
 def main2():
 	import asyncio
-	it = AsyncMultiDeferredIterator()
-	reactor.listenTCP(8000, RecvFactory(it))
-	reactor.callWhenRunning(defer.Deferred.fromFuture(asyncio.ensure_future(async_recv_stream)), it)
+	mdit = AsyncMultiDeferredIterator()
+	reactor.listenTCP(8000, RecvFactory(mdit))
+	reactor.callWhenRunning(defer.Deferred.fromFuture(asyncio.ensure_future(async_recv_stream)), mdit)
 	reactor.run()
 
 if __name__ == "__main__":

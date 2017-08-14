@@ -2,17 +2,20 @@ from __future__ import absolute_import, unicode_literals
 
 from functools import partial
 from itertools import chain
-import inspect, copy, warnings
+from abc import abstractmethod
+import inspect, warnings
 try:
 	from inspect import signature #py3.3+
 except ImportError:
 	from funcsigs import signature #backport
 
-import logging # debug
-logger = logging.getLogger(__name__) # debug
-
 from .utils import cast, Seq, log_methodcall_decorator # decorator only needed for development
 from . import __modulename__
+
+#pylint: disable=protected-access
+
+import logging # debug
+logger = logging.getLogger(__name__) # debug
 
 """
 todo: take care when remote objects are destroyed... __del__
@@ -22,22 +25,16 @@ todo: take care when remote objects are destroyed... __del__
 class RPCAttributeError(AttributeError):
 	"""Raised if method access is not allowed. For internal use."""
 
-class RPCInvalidObject(RuntimeError):
-	"""Raised if an invalid object is accessed. For internal use."""
-
 class RPCInvalidArguments(TypeError):
 	"""Raised if method is accessed with an invalid number of arguments
 	or unexpected keyword arguments. For internal use."""
 
+class RPCInvalidObject(RuntimeError):
+	"""Raised if an invalid object is accessed."""
+
 class NotAuthenticated(Exception):
 	"""Raised if method is called on object, whose connection
 	is not yet or not anymore authenticated."""
-
-class RPCNotAClass(TypeError):
-	"""Not used."""
-
-class RPCUserError(int):
-	"""Not used yet. Could be raised by functions in rpc service and returns a (self.ERROR, USERERROR, int)"""
 
 class ObjectId(int):
 	"""Wrapper to pass around object references"""
@@ -54,9 +51,11 @@ class CallAnyPublic(object):
 	def __dir__(self):
 		raise NotImplementedError("No introspection available")
 
+	@abstractmethod
 	def _callpublic(self, name):
 		raise NotImplementedError()
 
+	@abstractmethod
 	def _callprivate(self, name):
 		raise NotImplementedError()
 
@@ -83,7 +82,11 @@ class RemoteObjectGeneric(CallAnyPublic):
 		return partial(self._call, self._alias.get(name, name))
 
 	def _callprivate(self, name):
-		raise AttributeError("{} instance has no attribute '{}'".format(type(self).__name__, name)) # vs: __class__.__name__?. don't use RPCAttributeError, because this exception is exposed to the user
+	
+		"""called from user, so return user friendly exception """
+	
+		# vs: __class__.__name__?
+		raise AttributeError("{} instance has no attribute '{}'".format(type(self).__name__, name))
 
 	@property
 	def _connid(self):
@@ -113,8 +116,13 @@ class RemoteObjectGeneric(CallAnyPublic):
 	def __dir__(self):
 		return ["_connid", "_name", "_addr", "_service", "_lose", "_abort"]
 
-	def __setstate__(self, conn):
-		self._conn = conn
+	def __getstate__(self):
+		""" todo: return enough information to reestablish the connection later """
+		return (self._conn, self._alias)
+
+	def __setstate__(self, state):
+		""" reestablish the connection """
+		self._conn, self._alias = state
 
 class RemoteObject(RemoteObjectGeneric):
 
@@ -122,25 +130,29 @@ class RemoteObject(RemoteObjectGeneric):
 
 	def __init__(self, conn):
 		RemoteObjectGeneric.__init__(self, conn)
-		self._answers = 1
 
 	def _call(self, _name, *args, **kwargs):
+		# type: (unicode, *Any, **Any) -> RemoteResultDeferred
 		_name = unicode(_name)
-		return self._conn._call(_name, self._answers, *args, **kwargs) # type: RemoteResultDeferred
+		return self._conn._call(_name, *args, **kwargs)
 
 	def _call_with_streams(self, _name, *args, **kwargs):
+		# type: (unicode, *Any, **Any) -> RemoteResultDeferred
 		_name = unicode(_name)
-		return self._conn._call_with_streams(_name, *args, **kwargs) # type: RemoteResultDeferred
+		return self._conn._call_with_streams(_name, *args, **kwargs)
 
 	def _notify(self, _name, *args, **kwargs):
+		# type: (unicode, *Any, **Any) -> None
 		_name = unicode(_name)
-		self._conn._notify(_name, *args, **kwargs) # type: None
+		self._conn._notify(_name, *args, **kwargs)
 
 	def _stream(self, _name, *args, **kwargs): # could return a async iterator in the far future
+		# type: (unicode, *Any, **Any) -> MultiDeferredIterator
 		_name = unicode(_name)
-		return self._conn._stream(_name, *args, **kwargs) # type: MultiDeferredIterator
+		return self._conn._stream(_name, *args, **kwargs)
 
 	def __repr__(self):
+		# type: () -> unicode
 		return "'<RemoteObject object to {} at {}>'".format(self._conn.name, self._conn.addr)
 
 	def __dir__(self):
@@ -158,30 +170,38 @@ class RemoteInstance(RemoteObjectGeneric):
 		assert isinstance(classname, unicode)
 		self._objectid = objectid
 		self._classname = classname
-		self._answers = 1
 
 	def _call(self, _name, *args, **kwargs):
-		return self._conn._callmethod(self._objectid, _name, self._answers, *args, **kwargs) # type: RemoteResultDeferred
+		# type: (unicode, *Any, **Any) -> RemoteResultDeferred
+		return self._conn._callmethod(self._objectid, _name, *args, **kwargs)
+
+	def _call_with_streams(self, _name, *args, **kwargs):
+		# type: (unicode, *Any, **Any) -> RemoteResultDeferred
+		_name = unicode(_name)
+		return self._conn._callmethod_with_streams(_name, *args, **kwargs)
 
 	def _notify(self, _name, *args, **kwargs):
-		self._conn._notifymethod(self._objectid, _name, *args, **kwargs) # type: None
+		# type: (unicode, *Any, **Any) -> None
+		self._conn._notifymethod(self._objectid, _name, *args, **kwargs)
 
 	def _stream(self, _name, *args, **kwargs): # could return a async iterator in the far future
-		return self._conn._streammethod(self._objectid, _name, *args, **kwargs) # type: MultiDeferredIterator
+		# type: (unicode, *Any, **Any) -> MultiDeferredIterator
+		return self._conn._streammethod(self._objectid, _name, *args, **kwargs)
 
 	def __repr__(self):
+		# type: () -> unicode
 		return "'<RemoteInstance object {} [{}] to {} at {}>'".format(self._classname, self._objectid, self._conn.name, self._conn.addr)
 
 	def __dir__(self):
 		return RemoteObjectGeneric.__dir__(self) + ["_call", "_notify", "_stream", "_objectid", "_classname"]
 
 	def __getstate__(self):
+		""" just get the state of the remote instance, not of the underlying connection """
 		return (self._objectid, self._classname)
 
-	def __setstate__(self, conn, objectid, classname):
-		RemoteObjectGeneric.__setstate__(self, conn)
-		self._objectid = objectid
-		self._classname = classname
+	def __setstate__(self, state):
+		""" restore the remote instance, assuming there already is the correct underlying connection """
+		self._objectid, self._classname = state
 
 	@log_methodcall_decorator
 	def __del__(self): # called when garbage collected
@@ -201,27 +221,19 @@ class RemoteResult(RemoteObjectGeneric):
 		self._classname = classname
 
 	def _call(self, _name, *args, **kwargs):
-		return self._conn._callmethodonresult(self._sequid, _name, *args, **kwargs) # type: CallOnDeferred
+		return self._conn._callmethod_onresult(self._sequid, _name, *args, **kwargs) # type: CallOnDeferred
 
 	def _notify(self, _name, *args, **kwargs):
-		self._conn._notifymethodonresult(self._sequid, _name, *args, **kwargs) # type: None
+		self._conn._notifymethod_onresult(self._sequid, _name, *args, **kwargs) # type: None
 
 	def _stream(self, _name, *args, **kwargs): # could return a async iterator in the far future
-		return self._conn._streammethodonresult(self._sequid, _name, *args, **kwargs) # type: MultiDeferredIterator
+		return self._conn._streammethod_onresult(self._sequid, _name, *args, **kwargs) # type: MultiDeferredIterator
 
 	def __repr__(self):
 		return "'<RemoteResult object {} [{}] to {} at {}>'".format(self._classname, self._sequid, self._conn.name, self._conn.addr)
 
 	def __dir__(self):
 		return RemoteObjectGeneric.__dir__(self) + ["_call", "_notify", "_stream", "_sequid", "_classname"]
-
-	def __getstate__(self):
-		return (self._sequid, self._classname)
-
-	def __setstate__(self, conn, sequid, classname):
-		RemoteObjectGeneric.__setstate__(self, conn)
-		self._sequid = sequid
-		self._classname = classname
 
 	@log_methodcall_decorator
 	def __del__(self): # called when garbage collected
@@ -234,6 +246,7 @@ class RemoteResult(RemoteObjectGeneric):
 
 class NotifyRemoteObject(RemoteObject):
 	"""Notifies methods instead of calls"""
+
 	def __init__(self):
 		"""__init__ of super class is not called by design"""
 
@@ -243,21 +256,23 @@ class NotifyRemoteObject(RemoteObject):
 	def __repr__(self):
 		return "'<NotifyRemoteObject object to {} at {}>'".format(self._conn.name, self._conn.addr)
 
-class MultiRemoteObject(RemoteObject):
+class StreamRemoteObject(RemoteObject):
+	"""Expect a streamed (iterator) response"""
 
-	"""Can be used to set the number of expected answers in RemoteObject"""
-
-	def __init__(self, answers):
+	def __init__(self):
 		"""__init__ of super class is not called by design"""
-		self.answers = answers
+
+	def _call(self, _name, *args, **kwargs):
+		return self._stream(_name, *args, **kwargs) # handle deferred iterator here?
 
 	def __repr__(self):
-		return "'<MultiRemoteObject object to {} at {}>'".format(self._conn.name, self._conn.addr)
+		return "'<StreamRemoteObject object to {} at {}>'".format(self._conn.name, self._conn.addr)
 
 Notify = partial(cast, class_=NotifyRemoteObject, instanceof=RemoteObject)
-Multi = partial(cast, class_=MultiRemoteObject, instanceof=RemoteObject)
+Stream = partial(cast, class_=StreamRemoteObject, instanceof=RemoteObject)
 
 def Block(obj):
+	assert obj
 	raise Exception("Use 'defer.inlineCallbacks' or 'threads.blockingCallFromThread' for that in your function")
 
 """
@@ -271,7 +286,7 @@ def is_exposed(func):
 	return getattr(func, "_exposed", False)
 """
 
-def CallWithSignatureError(_attr, *args, **kwargs):
+def call_and_catch_signature_error(_attr, *args, **kwargs):
 	try:
 		return _attr(*args, **kwargs)
 	except TypeError as e:
@@ -289,11 +304,11 @@ class Service(object):
 	if you do:
 		Service is not properly initialized and will lack certain features"""
 
-	_alias = {}
-
 	def __init__(self, introspection=False, allow_foreign_access=False):
 		"""introspection (bool): allows user to remotely call introspection functions
 		allow_foreign_access (bool): allow access to objects created by other connections"""
+
+		self._alias = {}
 
 		self._objects = {}
 		self._objectids = Seq(0)
@@ -314,6 +329,11 @@ class Service(object):
 
 	@classmethod
 	def _aliases(cls, aliases):
+	
+		""" this is intended to be a decorator used for functions in services.
+			yet the decorator is applied at class construction time and has thus no
+			access to self. but class wide aliases would be bad."""
+	
 		def decorator(func):
 			for alias in aliases:
 				cls._alias[alias] = func.__name__
@@ -324,6 +344,10 @@ class Service(object):
 		"""Returns (classes, methods, functions) with signatures.
 		Does not take exposed aliases for private functions into account."""
 
+		"""
+		getargspec() is deprecated for python3, replace with signature
+		"""
+
 		classes = []
 		methods = []
 		functions = []
@@ -332,24 +356,20 @@ class Service(object):
 				attr = getattr(self, key)
 				if inspect.isclass(attr):
 					try:
-						signature = inspect.getargspec(attr.__init__)._asdict()
-						signature.update({"name": key})
+						class_sig = inspect.getargspec(attr.__init__)._asdict()
+						class_sig.update({"name": key})
 					except ValueError:
 						pass
-					classes.append(signature)
+					classes.append(class_sig)
 				elif inspect.ismethod(attr):
-					signature = inspect.getargspec(attr)._asdict()
-					signature.update({"name": key})
-					methods.append(signature)
+					method_sig = inspect.getargspec(attr)._asdict()
+					method_sig.update({"name": key})
+					methods.append(method_sig)
 				elif inspect.isfunction(attr):
-					signature = inspect.getargspec(attr)._asdict()
-					signature.update({"name": key})
-					functions.append(signature)
+					function_sig = inspect.getargspec(attr)._asdict()
+					function_sig.update({"name": key})
+					functions.append(function_sig)
 		return (tuple(classes), tuple(methods), tuple(functions))
-
-	def _aliases(self):
-		"""return dict of method aliases. (name -> name) mapping."""
-		return self._alias
 
 	def _call(self, _connid, _name, *args, **kwargs):
 		"""Dispatches calls on service based on name and type."""
@@ -357,7 +377,7 @@ class Service(object):
 			try:
 				_name = self._alias.get(_name, _name)
 			except AttributeError:
-				logging.exception("Maybe '{}.Service.__init__' was not called within service".format(__modulename__))
+				logger.exception("Maybe '%s.Service.__init__' was not called within service", __modulename__)
 			try:
 				attr = getattr(self, _name)
 			except AttributeError as e:
@@ -367,8 +387,8 @@ class Service(object):
 			# decide on called attribute NOT on result, because it would get to powerful otherwise,
 			# because every function could (by accident) return any valid object (like rpyc)
 
-			#result = bind_deferreds(CallWithSignatureError, attr, *args, **kwargs)
-			result = CallWithSignatureError(attr, *args, **kwargs) #verify: this should not be able to modify attr
+			#result = bind_deferreds(call_and_catch_signature_error, attr, *args, **kwargs)
+			result = call_and_catch_signature_error(attr, *args, **kwargs) #verify: this should not be able to modify attr
 			if inspect.isclass(attr):
 				objectid = self._objectids.next()
 				self._objects[objectid] = (result, _connid)
@@ -387,7 +407,7 @@ class Service(object):
 		except KeyError:
 			raise RPCInvalidObject("No object with id {}".format(_objectid))
 		except AttributeError:
-			logging.exception("Maybe '{}.Service.__init__' was not called within service".format(__modulename__))
+			logger.exception("Maybe '%s.Service.__init__' was not called within service", __modulename__)
 		return obj._call(_connid, _name, *args, **kwargs) # if this fails with AttributeError: Not inherited from Service?
 
 	def _delete(self, connid, objectid):
@@ -402,7 +422,7 @@ class Service(object):
 		try:
 			self._objects = {oid: (obj, connid_) for oid, (obj, connid_) in self._objects.iteritems() if connid_ != connid}
 		except AttributeError:
-			logging.exception("Maybe '{}.Service.__init__' was not called within service".format(__modulename__))
+			logger.exception("Maybe '%s.Service.__init__' was not called within service", __modulename__)
 
 	def _OnConnect(self): # why doesn't it have 'conn' as argument?
 		"""Is called when a new connection to the service is established"""
@@ -463,11 +483,13 @@ class SubServicesWithDefault(SubServices): #how will _callSubService be called? 
 
 class ServiceFactory:
 	"""Baseclass for Service factories"""
-	def build(self):
+
+	def build(self, *args, **kwargs):
 		raise NotImplementedError()
 
 class VoidServiceFactory(ServiceFactory):
 	"""Factory for services which do nothing"""
+
 	def __init__(self):
 		self.service = VoidService()
 
@@ -476,16 +498,18 @@ class VoidServiceFactory(ServiceFactory):
 
 class SharedService(ServiceFactory):
 	"""Service factory which uses the same service for all connections."""
+
 	def __init__(self, _service, *args, **kwargs):
 		self.service = _service(*args, **kwargs)
 
 	def build(self, *args, **kwargs):
-		if len(args) != 0 or len(kwargs) != 0:
+		if args or kwargs:
 			warnings.warn("build() of SharedService called with arguments, although they are ignored", RuntimeWarning, stacklevel=2)
 		return self.service
 
 class SharedUpdatedService(ServiceFactory):
 	"""Service factory which uses the same service for all connection but calls build method for each new connection"""
+
 	def __init__(self, _service, *args, **kwargs):
 		self.service = _service(*args, **kwargs)
 
@@ -495,6 +519,7 @@ class SharedUpdatedService(ServiceFactory):
 
 class SeparatedService(ServiceFactory):
 	"""Service factory which builds a new service for each connections."""
+
 	def __init__(self, _service, *args, **kwargs):
 		self.service = _service
 		self.args = args

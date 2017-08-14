@@ -47,24 +47,25 @@ class RPCClientFactory(ClientFactory):
 		except UnknownPeer:
 			conn = None
 		if conn:
-			logger.info("Connection to {} at {} failed, but was established from the other side in the meantime".format(self.name, connector.getDestination()))
+			logger.info("Connection to %s at %s failed, but was established from the other side in the meantime",
+				self.name, connector.getDestination())
 			# might not be from the other side, but a previously opened connection
 			# this is not very general and might not be what the user wants
 			self.auth_d.callback(conn)
 		else:
-			logger.warning("Connection to {} at {} failed: {}".format(self.name, connector.getDestination(), reason.getErrorMessage()))
+			logger.warning("Connection to %s at %s failed: %s", self.name, connector.getDestination(), reason.getErrorMessage())
 			self.auth_d.errback(NetworkError(reason.getErrorMessage()))
 
 	def clientConnectionLost(self, connector, reason):
 		self.friends.reset_connecting(self.name, self.auth_d) # only needed if connection is lost before authentication
 		if reason.check(error.ConnectionDone):
-			logger.debug("Connection to {} closed".format(connector.getDestination())) #logs needed? bc duplicate
+			logger.debug("Connection to %s closed", connector.getDestination()) #logs needed? bc duplicate
 		else:
-			logger.info("Connection to {} lost: {}".format(connector.getDestination(), reason.getErrorMessage()))
+			logger.info("Connection to %s lost: %s", connector.getDestination(), reason.getErrorMessage())
 
 	def startedConnecting(self, connector):
 		self.friends.start_connecting(self.name, self.auth_d)
-		logger.debug("Started connecting to {}".format(connector.getDestination()))
+		logger.debug("Started connecting to %s", connector.getDestination())
 
 	def buildProtocol(self, addr):
 		transport_protocol = self.transport_protocol_factory.buildProtocol(addr)

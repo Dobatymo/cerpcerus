@@ -23,15 +23,15 @@ def Task():
 
 	try:
 		yield conn.reactor()
-	except cerpcerus.RPCInvalidArguments:
+	except TypeError:
 		logging.info("reactor() failed as expected")
-	
+
 	try:
 		no_obj = conn.echo("asd")
 		yield no_obj.asd()
 	except cerpcerus.RPCInvalidObject:
 		logging.info("no_obj.asd() failed as expected")
-	
+
 	calc1 = yield conn.Calc(1)
 	calc2 = yield conn.Calc(2)
 	intro = yield calc1.introspect()
@@ -40,13 +40,13 @@ def Task():
 	calc2.add(10)
 	res1 = yield calc1.get()
 	res2 = yield calc2.get()
-	print(res1, res2)
+	assert res1 == 11 and res2 == 12
 
 	yield conn.remote(calc1)
 
 	d = yield dir(calc1)
 	print(d)
-	
+
 	for result in conn._stream("random", 10, 10):
 		try:
 			res = yield result
