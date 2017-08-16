@@ -1,13 +1,15 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 from struct import pack, unpack
 #import logging
 
 from twisted.internet.protocol import Protocol
 from twisted.internet.protocol import Factory # convenience import for other modules
 
-from utils import SimpleBuffer
-
 from twisted.internet.interfaces import IHandshakeListener
 from zope.interface import implementer
+
+from .utils import SimpleBuffer
 
 @implementer(IHandshakeListener) # otherwise handshakeCompleted is not called
 class SimpleProtocol(Protocol):
@@ -27,8 +29,9 @@ class SimpleProtocol(Protocol):
 	# call
 
 	def send_data(self, data):
-		"""Send packet
-		data: byte string (not unicode)"""
+		# type: (bytes, ) -> None
+
+		"""Send packet"""
 		buf_len = pack("!I", len(data))
 		self.transport.write(buf_len + data)
 		#self.transport.writeSequence((buf_len, data)) # is this better?
@@ -59,22 +62,27 @@ class SimpleProtocol(Protocol):
 		pass
 
 	def recv_data(self, data):
+		# type: (bytes, ) -> None
+
 		"""Receive packet"""
 		raise NotImplementedError("recv_data(self, data)")
 
 	# twisted protocol callbacks
 
 	def connectionMade(self):
+		# type: () -> None
 		self.connection_made()
 
-	def handshakeCompleted(self): # needs twisted-16.4.0. called after the tls connection has been established
+	def handshakeCompleted(self): # needs twisted-16.4.0. called after the TLS connection has been established
+		# type: () -> None
 		self.connection_open()
 
 	def connectionLost(self, reason):
 		self.connection_lost(reason)
 
 	def dataReceived(self, data):
-		"""called from twisted"""
+		# type: (bytes, ) -> None
+
 		self._pos = 0
 		#logging.debug("len(data): {}, pos: {}, length {}".format(len(data), self._pos, self._length))
 		while len(data) >= self._pos + self._length - len(self._buffer):

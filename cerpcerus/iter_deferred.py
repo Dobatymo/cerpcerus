@@ -1,3 +1,5 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import queue, logging
 
 from twisted.internet import defer, reactor, protocol
@@ -8,7 +10,7 @@ logger = logging.getLogger(__name__)
 call self.transport.pauseProducing() and self.transport.resumeProducing() if stream is sending too fast (queue gets too large
 """
 
-class MultiDeferredIterator:
+class MultiDeferredIterator(object):
 
 	"""should this be made pause/resume-able?
 	should be stoppable for sure
@@ -128,9 +130,9 @@ def recv_stream(async_iter):
 			print("stop")
 			break
 		except GeneratorExit:
-			logging.exception("GeneratorExit in recv")
+			logger.exception("GeneratorExit in recv")
 		except Exception:
-			logging.exception("Exception in recv")
+			logger.exception("Exception in recv")
 		yield sleep(1)
 		print("slept for a second")
 	reactor.stop()

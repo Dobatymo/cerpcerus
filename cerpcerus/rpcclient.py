@@ -1,16 +1,23 @@
-from __future__ import unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import logging
+from typing import TYPE_CHECKING
 
 from twisted.internet.protocol import ClientFactory
 from twisted.internet import defer, error
 
-from rpc import RemoteObject, VoidServiceFactory
-from rpcbase import RPCBase, IPAddr, NetworkError, AllFriends, UnknownPeer
-from utils import IProtocolConnector
+from .rpc import RemoteObject, VoidServiceFactory
+from .rpcbase import RPCBase, NetworkError, AllFriends, UnknownPeer
+from .utils import IProtocolConnector, IPAddr
 
-from simple_protocol import Factory, SimpleProtocol
-from websocket_protocol import WebSocketClientFactory, WebSocketClientAdapter
+from .simple_protocol import Factory, SimpleProtocol
+from .websocket_protocol import WebSocketClientFactory, WebSocketClientAdapter
+
+if TYPE_CHECKING:
+	from typing import Any, Optional
+	from twisted.internet import ssl
+	from twisted.internet.defer import Deferred
+
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +28,7 @@ class RPCClient(RPCBase):
 		self.deferred = deferred
 
 	def authenticated(self, pubkey):
-		self.friends.establish_connection(self.name, RemoteObject(self)) # overwrites existings connection
+		self.friends.establish_connection(self.name, RemoteObject(self)) # overwrites existing connection
 		self.friends.reset_connecting(self.name, self.deferred)
 		if self.deferred:
 			self.deferred.callback(RemoteObject(self))
@@ -78,7 +85,9 @@ class RPCClientFactory(ClientFactory):
 		return transport_protocol
 
 def Client(reactor, host, port, name, ssl_context, service=None, friends=None, transport_protocol_factory=None):
-	"""Connects to host:port, and uses 'name' as identifier for this connection.
+	# type: (Any, str, int, str, ssl.ContextFactory, Optional[Service], Optional[Friends], Optional[Factory]) -> Deferred
+
+	"""Connects to `host`:`port`, and uses `name` as identifier for this connection.
 	reactor: twisted reactor object
 	ssl_context: Twisted ssl.ContextFactory object
 	service: Service which the client provides (can be used from other side)
@@ -93,7 +102,7 @@ def Client(reactor, host, port, name, ssl_context, service=None, friends=None, t
 		transport_protocol_factory = Factory()
 		transport_protocol_factory.protocol = SimpleProtocol
 
-		# WebSocketAdapterProtocol does not support unregisterProducer()
+		# WebSocketAdapterProtocol does not support unregisterProducer() # should be fixed
 		#transport_protocol_factory = WebSocketClientFactory("wss://{}:{}".format(host, port), protocols=["binary"])
 		#transport_protocol_factory.protocol = WebSocketClientAdapter
 

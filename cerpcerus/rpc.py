@@ -1,4 +1,6 @@
-from __future__ import absolute_import, unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
+
+from future.utils import iteritems
 
 from functools import partial
 from itertools import chain
@@ -390,7 +392,7 @@ class Service(object):
 			#result = bind_deferreds(call_and_catch_signature_error, attr, *args, **kwargs)
 			result = call_and_catch_signature_error(attr, *args, **kwargs) #verify: this should not be able to modify attr
 			if inspect.isclass(attr):
-				objectid = self._objectids.next()
+				objectid = next(self._objectids)
 				self._objects[objectid] = (result, _connid)
 				return ObjectId(objectid)
 			else:
@@ -420,7 +422,7 @@ class Service(object):
 	def _deleteAllObjects(self, connid):
 		"""Deletes all objects created by this connection."""
 		try:
-			self._objects = {oid: (obj, connid_) for oid, (obj, connid_) in self._objects.iteritems() if connid_ != connid}
+			self._objects = {oid: (obj, connid_) for oid, (obj, connid_) in iteritems(self._objects) if connid_ != connid}
 		except AttributeError:
 			logger.exception("Maybe '%s.Service.__init__' was not called within service", __modulename__)
 
@@ -526,7 +528,7 @@ class SeparatedService(ServiceFactory):
 		self.kwargs = kwargs
 
 	def build(self, *args, **kwargs):
-		return self.service(*(self.args + args), **dict(chain(self.kwargs.iteritems(), kwargs.iteritems()))) #change order?
+		return self.service(*(self.args + args), **dict(chain(iteritems(self.kwargs), iteritems(kwargs)))) #change order?
 
 """class SeperatedSubServices(SeperatedService):
 	services = {}
@@ -538,6 +540,6 @@ class SeparatedService(ServiceFactory):
 
 	def build(self, *args, **kwargs):
 		service = SeperatedService.build(*args, **kwargs)
-		for name, service in self.services.iteritems():
+		for name, service in iteritems(self.services):
 			service._AddService(service, name)
 """

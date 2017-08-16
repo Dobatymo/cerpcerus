@@ -1,23 +1,24 @@
-from __future__ import absolute_import, unicode_literals, print_function
+from __future__ import absolute_import, division, print_function, unicode_literals
 
-import sys, logging
 from twisted.internet import reactor, defer
+
+from builtins import range
 
 import cerpcerus
 from cerpcerus.utils import pprint_introspect, sleep
 
-logging.basicConfig(level=logging.DEBUG, format="%(levelname)s\t%(name)s\t%(funcName)s\t%(message)s")
-
-ssl = cerpcerus.GenericRPCSSLContextFactory("client.pem.crt", "client.pem.key", False)
-
 @defer.inlineCallbacks
 def Task():
+
+	ssl = cerpcerus.GenericRPCSSLContextFactory("client.pem.crt", "client.pem.key", False)
+
 	try:
 		conn = yield cerpcerus.Client(reactor, "127.0.0.1", 1337, "Server", ssl)
 	except cerpcerus.rpcbase.NetworkError:
 		print("Could not connect to server")
-		reactor.callLater(0, Stop)
+		cerpcerus.stopreactor(reactor)
 		return
+
 	intro = yield conn.introspect()
 	pprint_introspect(intro)
 
@@ -74,13 +75,15 @@ def Task():
 	#	#print(result)
 	yield sleep(5)
 	yield conn._lose()
-	reactor.callLater(0, Stop)
+	cerpcerus.stopreactor(reactor)
 
-def Stop(*args):
-	reactor.stop()
+if __name__ == ""__main__":
 
-import txaio
-txaio.start_logging(level="debug")
+	import logging
+	logging.basicConfig(level=logging.DEBUG, format="%(levelname)s\t%(name)s\t%(funcName)s\t%(message)s")
 
-reactor.callWhenRunning(Task)
-reactor.run()
+	import txaio
+	txaio.start_logging(level="debug")
+
+	reactor.callWhenRunning(Task)
+	reactor.run()

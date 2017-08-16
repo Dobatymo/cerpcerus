@@ -1,7 +1,11 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import random, string
 
-def randstring(length):
-    return "".join(random.choice(string.letters) for i in xrange(random.randint(0, length)))
+from builtins import range
+
+def randstring(maxlen, minlen=0):
+	return "".join(random.choice(string.letters) for _ in range(random.randint(minlen, maxlen)))
 
 def randblob(length):
-    return "".join(chr(random.randint(0,255)) for _ in xrange(length))
+	return bytes(random.randint(0, 255) for _ in range(length))

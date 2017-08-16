@@ -1,10 +1,12 @@
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import logging
-from itertools import izip
+from builtins import zip
+from future.utils import iterkeys
 
 from twisted.internet import defer
 
-from cerpcerus.utils import args_str
+from .utils import args_str
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +48,7 @@ def DeferredDict(dct):
 
 	def success(result):
 		successes, values = zip(*result)
-		return dict(izip(dct.iterkeys(), values))
+		return dict(zip(iterkeys(dct), values))
 	
 	def failure(failure):
 		raise Exception("what to do?")
@@ -101,7 +103,7 @@ def bind_deferreds(func, *bind_args, **bind_kwargs):
 		return func(*args, **bind_kwargs)
 
 	def failure(failure): #failure evaluating arguments
-		logging.warning(failure)
+		logger.warning(failure)
 		failure.raiseException()
 
 	if deferreds_args or deferreds_kwargs:

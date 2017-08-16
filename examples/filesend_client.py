@@ -1,19 +1,19 @@
-from __future__ import print_function, absolute_import
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import os.path, logging
-from twisted.internet import reactor, defer
+from io import open
+from twisted.internet import defer
 
 import cerpcerus
 
 @defer.inlineCallbacks
-def Task(path, files):
+def Download(reactor, path, files):
+	ssl = cerpcerus.GenericRPCSSLContextFactory("client.pem.crt", "client.pem.key", False)
 	try:
-		ssl = cerpcerus.GenericRPCSSLContextFactory("client.pem.crt", "client.pem.key", False)
 		conn = yield cerpcerus.Client(reactor, "127.0.0.1", 1337, "Server", ssl)
 		print("Connected to server")
 	except cerpcerus.rpcbase.NetworkError:
 		print("Could not connect to server")
-		reactor.callLater(0, reactor.stop)
 		return
 
 	for f in files:
@@ -40,18 +40,40 @@ def Task(path, files):
 			logging.exception("Downloading failed")
 
 	yield conn._lose()
-	reactor.callLater(0, reactor.stop)
+
+@defer.inlineCallbacks
+def List(reactor):
+	try:
+		ssl = cerpcerus.GenericRPCSSLContextFactory("client.pem.crt", "client.pem.key", False)
+		conn = yield cerpcerus.Client(reactor, "127.0.0.1", 1337, "Server", ssl).addTimeout(10, reactor)
+		print("Connected to server")
+	except cerpcerus.rpcbase.NetworkError:
+		print("Could not connect to server")
+		return
+	except defer.TimeoutError:
+		print("Error: Timed out after 10 seconds")
+
+	files = yield conn.list()
+	for path, size in files:
+		print(size, path)
+
+	yield conn._lose()
 
 if __name__ == "__main__":
+
+	from twisted.internet import task
 
 	logging.basicConfig(level=logging.DEBUG, format="%(levelname)s\t%(name)s\t%(funcName)s\t%(message)s")
 
 	import argparse
 
 	parser = argparse.ArgumentParser(description="Download files")
-	parser.add_argument("path")
-	parser.add_argument("files", nargs="+")
+	parser.add_argument("action", choices=["list", "download"])
+	parser.add_argument("path", nargs="?")
+	parser.add_argument("files", nargs="*")
 	args = parser.parse_args()
 
-	reactor.callWhenRunning(Task, args.path, args.files)
-	reactor.run()
+	if args.action == "list":
+		task.react(List)
+	elif args.action == "download":
+		task.react(Download, (args.path, args.files))

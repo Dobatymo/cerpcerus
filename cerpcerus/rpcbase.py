@@ -1,15 +1,16 @@
-from __future__ import absolute_import, unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
 
-import logging, Queue, itertools
+from future.utils import iteritems
+
+import logging, queue, itertools
 from functools import partial
 
 import msgpack
 from OpenSSL import SSL, crypto, __version__ as pyopenssl_version
 from twisted.internet import ssl, defer, error
 
-from .utils import cert_info, args_str, Seq
+from .utils import cert_info, args_str, Seq, IPAddr
 from .rpc import RemoteObject, RemoteInstance, RemoteResult, RPCAttributeError, RPCInvalidArguments, RPCInvalidObject, NotAuthenticated, ObjectId
-
 from .iter_deferred import MultiDeferredIterator
 
 #pylint: disable=protected-access
@@ -114,7 +115,7 @@ class AllFriends(IFriends):
 		try:
 			return self.friends[public_key]
 		except KeyError:
-			self.friends[public_key] = self.seq.next()
+			self.friends[public_key] = next(self.seq)
 			return self.friends[public_key]
 
 	def get_connection(self, name):
@@ -148,15 +149,17 @@ class Streamable(Generator):
 
 	def __next__(self): # returns a piece of data
 		raise NotImplementedError()
-	
+
 	def __repr__(self):
 		return "'<Streamable>'"
 
+	next = __next__ # py2
+
 # unfinished, untested
-class PushProducerRoundRobin:
+class PushProducerRoundRobin(object):
 	def __init__(self, consumer):
 		self.consumer = consumer
-		self.queue = Queue.Queue()
+		self.queue = queue.Queue()
 		self.pushing = True
 
 	def add(self, msg):
@@ -175,7 +178,7 @@ class PushProducerRoundRobin:
 				else:
 					self.consumer.write(msg)
 
-		except Queue.Empty:
+		except queue.Empty:
 			pass
 
 	def pauseProducing(self):
@@ -186,7 +189,7 @@ class PushProducerRoundRobin:
 		pass
 
 from twisted.internet.threads import deferToThread
-class file_sender:
+class file_sender(object):
 
 	def __init__(self, path, buffer=1024*1024):
 		self.fp = open(path, "rb")
@@ -205,6 +208,8 @@ class file_sender:
 
 	def __next__(self):
 		return deferToThread(self._read)
+
+	next = __next__ # py2
 
 class RPCPullProducer:
 
@@ -265,8 +270,8 @@ class RPCPullProducer:
 		msg = (MessageTypes.STREAM_END, sequid)
 		self.send_msgpack(msg)
 
-	def send_error(self, sequid, code):
-		msg = (MessageTypes.STREAM_ERROR, sequid, code, None)
+	def send_error(self, sequid, errortype, errormsg=None):
+		msg = (MessageTypes.STREAM_ERROR, sequid, errortype, errormsg)
 		self.send_msgpack(msg)
 
 	# client sender (to server)
@@ -312,14 +317,14 @@ class PullProducerQueue(RPCPullProducer):
 
 	def __init__(self, consumer, maxsize=0):
 		RPCPullProducer.__init__(self, consumer)
-		self.queue = Queue.Queue(maxsize) # use queue size to signal high resource usage
+		self.queue = queue.Queue(maxsize) # use queue size to signal high resource usage
 		self.current = None
 
 	def _add(self, senders, iterable):
 		assert isinstance(iterable, GeneratorType)
 		try:
 			self.queue.put_nowait((senders, iterable)) #raises if queue is full, can dataReceived be slowed? (by pauseProducing?), just send resource error
-		except Queue.Full:
+		except queue.Full:
 			raise ResourceExhaustedError("Send queue is full")
 		#should already call deferred here if buffer is empty (and add to buffer)
 
@@ -340,16 +345,23 @@ class PullProducerQueue(RPCPullProducer):
 
 			(send_result, send_end, send_error), iterable = self.current
 			try:
+				""" if next() raises exception, than all following calls to next()
+					will just raise StopIteration.
+					this way streams cannot returns multiple errors,
+					which means we can stop on error"""
 				self._write(send_result, send_error, next(iterable))
 			except StopIteration:
 				send_end()
 				self.current = None
+			except RPCUserError as e:
+				send_error(RPCBase.ERRORS.UserError, e.args)
+				self.current = None
 			except Exception:
 				send_error(RPCBase.ERRORS.GeneralError)
 				logger.exception("Calling iterator failed")
-				# stop on error?
+				self.current = None
 
-		except Queue.Empty:
+		except queue.Empty:
 			#logger.debug("Producer has run out of data, unregistering...")
 			self.consumer.unregisterProducer()
 			self.registered = False
@@ -439,7 +451,7 @@ class RPCBase(RPCProtocolBase):
 	connids = Seq(0)
 
 	def __init__(self, friends, transport_protocol):
-		self.connid = self.connids.next()
+		self.connid = next(self.connids)
 		self._sequid = Seq(0) #was static/class var before
 		self.friends = friends
 		self.tp = transport_protocol
@@ -498,9 +510,10 @@ class RPCBase(RPCProtocolBase):
 		logger.exception(failure.getErrorMessage())
 		self.send_msgpack(msg)
 
-	#@needs_service
 	def proc_notifymethod(self, objectid, name, args, kwargs):
 		assert isinstance(name, unicode)
+		assert self.service
+
 		try:
 			self.service._callmethod(self.connid, objectid, name, *args, **kwargs)
 		except RPCUserError:
@@ -514,9 +527,10 @@ class RPCBase(RPCProtocolBase):
 		except Exception:
 			logger.exception("%sRPC %s(%s) failed", L, name, args_str(args, kwargs))
 
-	#@needs_service
 	def proc_call(self, sequid, name, args, kwargs):
 		assert isinstance(name, unicode)
+		assert self.service
+
 		try:
 			#if name.startswith("_") check not needed. Service does that and raises RPCAttributeError
 
@@ -553,9 +567,10 @@ class RPCBase(RPCProtocolBase):
 
 		return msg
 
-	#@needs_service
 	def proc_callmethod(self, sequid, objectid, name, args, kwargs):
 		assert isinstance(name, unicode)
+		assert self.service
+
 		try:
 			result = self.service._callmethod(self.connid, objectid, name, *args, **kwargs)
 			if isinstance(result, defer.Deferred):
@@ -613,13 +628,13 @@ class RPCBase(RPCProtocolBase):
 				if self.service:
 					try:
 						self.service._call(self.connid, name, *args, **kwargs)
-					except RPCUserError as e:
+					except RPCUserError:
 						logger.info("%sUser Error", L)
-					except RPCAttributeError as e:
+					except RPCAttributeError:
 						logger.debug("%sNo Such Function %s", L, name)
-					except RPCInvalidArguments as e:
+					except RPCInvalidArguments:
 						logger.debug("%sWrong Arguments", L)
-					except Exception as e:
+					except Exception:
 						logger.exception("%sRPC %s(%s) failed", L, name, args_str(args, kwargs))
 				else:
 					logger.debug("No Service")
@@ -757,33 +772,32 @@ class RPCBase(RPCProtocolBase):
 				else:
 					logger.debug("No Service")
 
-			elif type == MessageTypes.STREAM_ARGUMENT: # like STREAM_RESULT
+			elif type == MessageTypes.STREAM_ARGUMENT:
 
 				sequid, arg_pos, result = msg[1:]
 
 				try:
 					deferred, name = self._calldeferreds[(sequid, arg_pos)]
 					#deferred = self._calldeferreds[sequid][arg_pos]
-					logger.debug("Received argument stream %s([%s]) [%s], calling iterator", name, arg_pos, sequid)
+					logger.debug("Received arg stream %s([%s]) [%s], calling iterator", name, arg_pos, sequid)
 					deferred.callback(result)
 				except KeyError:
-					logger.info("Received stream with unknown Sequence ID %s or argument number %s", sequid, arg_pos)
+					logger.info("Received arg stream with unknown SeqID [%s] or argument number (%s)", sequid, arg_pos)
 
-			elif type == MessageTypes.ARGUMENT_ERROR: # how do i handle stream errors? can i interrupt remote streams?
+			elif type == MessageTypes.ARGUMENT_ERROR:
 				sequid, arg_pos, errortype, errormsg = msg[1:]
 
-				raise RuntimeError("not implemented")
+				raise RuntimeError("ARGUMENT_ERROR not implemented yet")
 
 			elif type == MessageTypes.ARGUMENT_END:
-
 				sequid, arg_pos = msg[1:]
 
 				try:
 					deferred, name = self._calldeferreds.pop((sequid, arg_pos))
-					logger.debug("Received end of argument stream %s([%s]) [%s], deleting iterator", name, arg_pos, sequid)
+					logger.debug("Received end of arg stream %s([%s]) [%s], deleting iterator", name, arg_pos, sequid)
 					deferred.completed()
 				except KeyError:
-					logger.info("Received stream with unknown Sequence ID %s or argument number %s", sequid, arg_pos)
+					logger.info("Received end of arg stream with unknown SeqID [%s] or argument number (%s)", sequid, arg_pos)
 
 			elif type == MessageTypes.RESULT:
 				sequid, result = msg[1:]
@@ -793,7 +807,7 @@ class RPCBase(RPCProtocolBase):
 					logger.debug("Received result %s() [%s], calling callback", name, sequid)
 					deferred.callback(result)
 				except KeyError:
-					logger.info("Unknown Sequence ID received: %s", sequid)
+					logger.info("Received result with unknown SeqID [%s]", sequid)
 
 			elif type == MessageTypes.OBJECT:
 				sequid, objectid = msg[1:]
@@ -803,16 +817,16 @@ class RPCBase(RPCProtocolBase):
 					logger.debug("Received object [%s]=%s [%s], calling callback", objectid, classname, sequid)
 					deferred.callback(RemoteInstance(self, objectid, classname))
 				except KeyError:
-					logger.info("Unknown Sequence ID received: %s", sequid)
+					logger.info("Received object [%s] with unknown SeqID [%s]", objectid, sequid)
 
-			elif type == MessageTypes.ERROR: # how do I handle stream errors? can I interrupt remote streams?
+			elif type == MessageTypes.ERROR:
 				sequid, errortype, errormsg = msg[1:]
 
-				logger.debug("Received error %s [%s], calling errback", errortype, sequid)
 				try:
 					deferred, name = self._deferreds.pop(sequid) #removes deferred (cannot receive errors with same sequid, change?)
+					logger.debug("Received error %s [%s], calling errback", errortype, sequid)
 					if errortype == self.ERRORS.UserError:
-						deferred.errback(RPCUserError(errormsg))
+						deferred.errback(RPCUserError(*errormsg))
 					elif errortype == self.ERRORS.ResourceExhausted:
 						deferred.errback(ResourceExhaustedError("Not enough free resources on endpoint"))
 					elif errortype == self.ERRORS.NoSuchFunction:
@@ -826,7 +840,7 @@ class RPCBase(RPCProtocolBase):
 					else:
 						deferred.errback(RPCError("Received unknown error"))
 				except KeyError:
-					logger.info("Unknown Sequence ID received: %s", sequid)
+					logger.info("Received error with unknown SeqID [%s]", sequid)
 
 			elif type == MessageTypes.STREAM_RESULT:
 				sequid, result = msg[1:]
@@ -836,12 +850,31 @@ class RPCBase(RPCProtocolBase):
 					logger.debug("Received stream %s() [%s], calling iterator", name, sequid)
 					deferred.callback(result)
 				except KeyError:
-					logger.info("Unknown Sequence ID received: %s", sequid)
+					logger.info("Received stream with unknown SeqID [%s]", sequid)
 
 			elif type == MessageTypes.STREAM_ERROR:
 				sequid, errortype, errormsg = msg[1:]
 
-				raise RuntimeError("not implemented")
+				"""
+				stream cannot have ResourceExhausted
+				fixme: stream calls which fail before the rpc can decide it's a stream, will return a ERROR, not STREAM_ERROR (NoSuchFunction, WrongArguments, InvalidObject)
+				
+				could there be errors which are not caused by exceptions in the iterator
+				and thus don't stop the iterator and thus continue sending?
+				Maybe some informational messages for the client? then deferreds cannot be pop()'ed
+				"""
+
+				try:
+					deferred, name = self._multideferreds.pop(sequid)
+					logger.debug("Received stream error %s for %s() [%s], deleting iterator", errortype, name, sequid)
+					if errortype == self.ERRORS.UserError:
+						deferred.errback(RPCUserError(*errormsg))
+					elif errortype == self.ERRORS.GeneralError:
+						deferred.errback(Exception("{}() failed in an unexpected way".format(name)))
+					else:
+						deferred.errback(RPCError("Received unknown error"))
+				except KeyError:
+					logger.info("Received stream error with unknown SeqID [%s]", sequid)
 
 			elif type == MessageTypes.STREAM_END:
 				sequid, = msg[1:]
@@ -851,7 +884,7 @@ class RPCBase(RPCProtocolBase):
 					logger.debug("Received end of stream %s() [%s], deleting iterator", name, sequid)
 					deferred.completed()
 				except KeyError:
-					logger.info("Unknown Sequence ID received: %s", sequid)
+					logger.info("Received end of stream with unknown SeqID [%s]", sequid)
 
 			else:
 				logger.warning("Unknown message type received: %s", type)
@@ -893,7 +926,7 @@ class RPCBase(RPCProtocolBase):
 	def _call(self, _name, *args, **kwargs):
 		assert isinstance(_name, unicode), type(_name)
 
-		sequid = self._sequid.next()
+		sequid = next(self._sequid)
 		logger.debug("calling remote %s(%s) [%s]", _name, args_str(args, kwargs), sequid)
 		msg = (MessageTypes.CALL, sequid, _name, args, kwargs)
 		assert sequid not in self._deferreds, "Must not reuse sequence id"
@@ -906,7 +939,7 @@ class RPCBase(RPCProtocolBase):
 	def _call_with_streams(self, _name, *args, **kwargs): # same for _stream_with_streams, copy
 		assert isinstance(_name, unicode), type(_name)
 
-		sequid = self._sequid.next()
+		sequid = next(self._sequid)
 
 		def filter_args(args, sequid):
 			for arg_pos, arg in enumerate(args): # only handle positional args for now
@@ -928,7 +961,7 @@ class RPCBase(RPCProtocolBase):
 
 	@ValidateConnection
 	def _callmethod(self, _objectid, _name, *args, **kwargs):
-		sequid = self._sequid.next()
+		sequid = next(self._sequid)
 		logger.debug("calling remote method [%s].%s(%s) [%s]", _objectid, _name, args_str(args, kwargs), sequid)
 		msg = (MessageTypes.CALLMETHOD, sequid, _objectid, _name, args, kwargs)
 		assert sequid not in self._deferreds, "Must not reuse sequence id"
@@ -945,7 +978,7 @@ class RPCBase(RPCProtocolBase):
 	def _stream(self, _name, *args, **kwargs):
 		assert isinstance(_name, unicode), type(_name)
 
-		sequid = self._sequid.next()
+		sequid = next(self._sequid)
 		logger.debug("requesting stream from remote %s(%s) [%s]", _name, args_str(args, kwargs), sequid)
 		msg = (MessageTypes.CALL, sequid, _name, args, kwargs)
 		assert sequid not in self._multideferreds, "Must not reuse sequence id"
@@ -958,7 +991,7 @@ class RPCBase(RPCProtocolBase):
 	def _streammethod(self, _objectid, _name, *args, **kwargs):
 		assert isinstance(_name, unicode), type(_name)
 
-		sequid = self._sequid.next()
+		sequid = next(self._sequid)
 		logger.debug("requesting stream from remote method [%s].%s(%s) [%s]", _objectid, _name, args_str(args, kwargs), sequid)
 		msg = (MessageTypes.CALLMETHOD, sequid, _objectid, _name, args, kwargs)
 		assert sequid not in self._multideferreds, "Must not reuse sequence id"
@@ -970,7 +1003,7 @@ class RPCBase(RPCProtocolBase):
 	@ValidateConnection
 	def _callmethod_onresult(self, prev_sequid, _name, *args, **kwargs):
 
-		sequid = self._sequid.next()
+		sequid = next(self._sequid)
 		logger.debug("calling remote method on result [%s].%s(%s) [%s]", prev_sequid, _name, args_str(args, kwargs), sequid)
 		msg = (MessageTypes.CALLMETHOD_ON_RESULT, sequid, prev_sequid, _name, args, kwargs)
 		assert sequid not in self._deferreds, "Must not reuse sequence id"
@@ -1059,10 +1092,10 @@ class RPCBase(RPCProtocolBase):
 			logger.debug("%s outstanding requests, %s streams", len(self._deferreds), len(self._multideferreds))
 
 			if reason.check(error.ConnectionDone):
-				for sequid, (deferred, __) in itertools.chain(self._deferreds.iteritems(), self._multideferreds.iteritems()):
+				for sequid, (deferred, __) in itertools.chain(iteritems(self._deferreds), iteritems(self._multideferreds)):
 					deferred.errback(ConnectionLost("Connection to {} closed".format(self.name)))
 			else:
-				for sequid, (deferred, __) in itertools.chain(self._deferreds.iteritems(), self._multideferreds.iteritems()):
+				for sequid, (deferred, __) in itertools.chain(iteritems(self._deferreds), iteritems(self._multideferreds)):
 					deferred.errback(ConnectionLost("Connection to {} lost: {}".format(self.name, reason.getErrorMessage())))
 
 		else:
@@ -1150,26 +1183,3 @@ class GenericRPCSSLContextFactory(ssl.ContextFactory):
 		else:
 			logger.info("Certificates are valid: %s", x509.get_subject())
 			return True
-
-class IPAddr(object):
-	"""Simple class which containts IP and port"""
-	def __init__(self, ip, port):
-		#self.atyp
-		self.ip = ip
-		self.port = port
-
-	def __str__(self):
-		return "{!s}:{!s}".format(self.ip, self.port)
-
-	def __repr__(self):
-		return "IPAddr({!r}, {!r})".format(self.ip, self.port)
-
-	def __iter__(self):
-		return iter((self.ip, self.port))
-
-	def __eq__(self, other):
-		if other is None:
-			return False
-		return self.ip == other.ip and self.port == other.port
-
-	__hash__ = object.__hash__ #needed in py3 because of __eq__ override

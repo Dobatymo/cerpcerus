@@ -1,6 +1,8 @@
-from __future__ import absolute_import, unicode_literals
-import sys, logging
-from twisted.internet import reactor, defer
+from __future__ import absolute_import, division, print_function, unicode_literals
+
+from builtins import range
+
+from twisted.internet import defer
 
 import cerpcerus
 from cerpcerus.utils import sleep
@@ -49,13 +51,13 @@ class TestService(cerpcerus.DebugService):
 		def __init__(self, num):
 			cerpcerus.Service.__init__(self, True)
 			self.num = num
-		
+
 		def add(self, num):
 			self.num += num
-		
+
 		def sub(self, num):
 			self.num -= num
-		
+
 		def get(self):
 			return self.num
 
@@ -67,11 +69,16 @@ class MySSLContextFactory(cerpcerus.GenericRPCSSLContextFactory):
 	def valid_ca_cert_files(self):
 		return ("client.pem.crt",)
 
-logging.basicConfig(level=logging.DEBUG, format="%(levelname)s\t%(name)s\t%(funcName)s\t%(message)s")
-import txaio
-txaio.start_logging(level="debug")
-service = cerpcerus.SeparatedService(TestService, reactor)
-ssl = MySSLContextFactory()
+if __name__ == "__main__":
+	import logging
+	logging.basicConfig(level=logging.DEBUG, format="%(levelname)s\t%(name)s\t%(funcName)s\t%(message)s")
+	import txaio
+	txaio.start_logging(level="debug")
 
-cerpcerus.Server(reactor, 1337, ssl, service, interface = "127.0.0.1")
-reactor.run()
+	from twisted.internet import reactor
+
+	service = cerpcerus.SeparatedService(TestService, reactor)
+	ssl = MySSLContextFactory()
+
+	cerpcerus.Server(reactor, 1337, ssl, service, interface = "127.0.0.1")
+	reactor.run()

@@ -1,15 +1,21 @@
-from __future__ import unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import logging
+from typing import TYPE_CHECKING
 
 from twisted.internet.protocol import ServerFactory
 
-from rpc import RemoteObject, VoidServiceFactory
-from rpcbase import RPCBase, IPAddr, AllFriends
-from utils import IProtocolConnector
+from .rpc import RemoteObject, VoidServiceFactory
+from .rpcbase import RPCBase, AllFriends
+from .utils import IProtocolConnector, IPAddr
 
-from simple_protocol import Factory, SimpleProtocol
-from websocket_protocol import WebSocketServerFactory, WebSocketServerAdapter
+from .simple_protocol import Factory, SimpleProtocol
+from .websocket_protocol import WebSocketServerFactory, WebSocketServerAdapter
+
+if TYPE_CHECKING:
+	from typing import Any, Optional
+	from twisted.internet import ssl
+
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +44,9 @@ class RPCServerFactory(ServerFactory):
 		return transport_protocol
 
 def Server(reactor, port, ssl_context_factory, service=None, friends=None, transport_protocol_factory=None, interface="", backlog=None):
-	"""Starts rpc server on 'port' on 'interface'.
+	# type: (Any, int, ssl.ContextFactory, Optional[Service], Optional[Friends], Optional[Factory], str, Optional[int]) -> ssl.Port
+
+	"""Starts rpc server on `port` on `interface`.
 	reactor: Twisted reactor object
 	ssl_context_factory: Twisted ssl.ContextFactory object
 	service: Service offered to the other side of the connection (default: VoidServiceFactory())
@@ -55,7 +63,7 @@ def Server(reactor, port, ssl_context_factory, service=None, friends=None, trans
 		transport_protocol_factory = Factory()
 		transport_protocol_factory.protocol = SimpleProtocol
 
-		# WebSocketAdapterProtocol does not support unregisterProducer()
+		# WebSocketAdapterProtocol does not support unregisterProducer() # should be fixed
 		#transport_protocol_factory = WebSocketServerFactory(u"wss://{}:{}".format(interface, port), protocols=["binary"])
 		#transport_protocol_factory.protocol = WebSocketServerAdapter
 

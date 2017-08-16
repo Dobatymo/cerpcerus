@@ -1,11 +1,35 @@
-import functools
-from collections import OrderedDict
+from __future__ import absolute_import, division, print_function, unicode_literals
 
-from twisted.internet import reactor, defer
-def sleep(secs):
-	d = defer.Deferred()
+from functools import partial, wraps
+from collections import OrderedDict
+from typing import TYPE_CHECKING
+
+from builtins import zip, range, map
+
+if TYPE_CHECKING:
+	from OpenSSL.crypto import X509
+	from twisted.internet.base import ReactorBase, DelayedCall
+
+# twisted
+
+from twisted.internet import reactor as _reactor
+from twisted.internet.defer import Deferred
+
+def sleep(secs, reactor=None):
+	# type: (float, ReactorBase) -> Deferred
+	if reactor is None:
+		reactor = _reactor
+	d = Deferred()
 	reactor.callLater(secs, d.callback, None)
 	return d
+
+def stopreactor(reactor=None):
+	# type: (ReactorBase,) -> DelayedCall
+	if reactor is None:
+		reactor = _reactor
+	return reactor.callLater(0, reactor.stop)
+
+# random
 
 from random import choice
 from string import ascii_lowercase
@@ -15,21 +39,47 @@ def random(size, num):
 
 def partial_decorator(*args, **kwargs):
 	def decorator(func):
-		return functools.partial(func, *args, **kwargs)
+		return partial(func, *args, **kwargs)
 	return decorator
 
 def cast(_object, _class, _instanceof=object, *args, **kwargs):
 	"""Changes the class of '_object' to '_class' if '_object' is an instance of '_instanceof', calls the constructor and returns it"""
 	_object = copy.copy(_object)
 	if isinstance(_object, _instanceof):
-		object_.__class__ = _class
-		object_.__init__(*args, **kwargs)
+		_object.__class__ = _class
+		_object.__init__(*args, **kwargs)
 	else:
 		raise TypeError("Object is not an instance of {}".format(_instanceof.__name__))
 	return _object
 
-class Seq:
+class IPAddr(object):
+	"""Simple class which containts IP and port"""
+
+	def __init__(self, ip, port):
+		#self.atyp
+		self.ip = ip
+		self.port = port
+
+	def __str__(self):
+		return "{!s}:{!s}".format(self.ip, self.port)
+
+	def __repr__(self):
+		return "IPAddr({!r}, {!r})".format(self.ip, self.port)
+
+	def __iter__(self):
+		return iter((self.ip, self.port))
+
+	def __eq__(self, other):
+		if other is None:
+			return False
+		return self.ip == other.ip and self.port == other.port
+
+	__hash__ = object.__hash__ #needed in py3 because of __eq__ override
+
+
+class Seq(object):
 	"""A sequence class. Used to abstract something like i+=1 for unique ids."""
+
 	def __init__(self, state=0):
 		self.state = state
 
@@ -37,47 +87,52 @@ class Seq:
 		"""for iter protocol"""
 		return self
 
-	def next(self):
+	def __next__(self):
 		"""Call to set and return next state."""
 		self.state += 1
 		return self.state
 
+	next = __next__ # py2
+
 import traceback, logging
 def log_methodcall_decorator(func):
-	@functools.wraps(func)
+	@wraps(func)
 	def decorator(self, *args, **kwargs):
-		logging.debug("{}.{}({})".format(self.__class__.__name__, func.__name__, args_str(args, kwargs))) #type(self).__name__ ?
+		logging.debug("%s.%s(%s)", self.__class__.__name__, func.__name__, args_str(args, kwargs)) #type(self).__name__ ?
 		#logging.debug(self.__class__.__name__ + "\n" + "\n".join(map(lambda x: " : ".join(map(str, x)), traceback.extract_stack())))
 		return func(self, *args, **kwargs)
 	return decorator
 
 def log_methodcall_result(func):
-	@functools.wraps(func)
+	@wraps(func)
 	def decorator(self, *args, **kwargs):
-		logging.debug("{}.{}({})".format(self.__class__.__name__, func.__name__, args_str(args, kwargs))) #type(self).__name__ ?
+		logging.debug("%s.%s(%s)", self.__class__.__name__, func.__name__, args_str(args, kwargs)) #type(self).__name__ ?
 		#logging.debug(self.__class__.__name__ + "\n" + "\n".join(map(lambda x: " : ".join(map(str, x)), traceback.extract_stack())))
 		res = func(self, *args, **kwargs)
-		logging.debug("{}.{} => {}".format(self.__class__.__name__, func.__name__, res)) #type(self).__name__ ?
+		logging.debug("%s.%s => %s", self.__class__.__name__, func.__name__, res) #type(self).__name__ ?
 		return res
 	return decorator
 
 def cert_info(cert):
+	# type: (X509, ) -> str
 	"""user readable certificate information"""
 
 	return "Subject: {}, Issuer: {}, Serial Number: {}, Version: {}".format(cert.get_subject().commonName, cert.get_issuer().commonName, cert.get_serial_number(), cert.get_version())
 
-def args_str(args, kwargs, max=20, app="...", repr_args=True):
+def args_str(args, kwargs, maxlen=20, app="...", repr_args=True):
+	# type: (tuple, dict, int, str, bool) -> str
+
 	"""creates printable string from callable arguments"""
 
 	def arg_str(arg, repr_args=repr_args):
 		if repr_args:
 			arg = repr(arg)
 		assert isinstance(arg, str)
-		if max:
-			if len(arg) <= max+len(app):
+		if maxlen:
+			if len(arg) <= maxlen+len(app):
 				return arg
 			else:
-				return arg[:max] + app
+				return arg[:maxlen] + app
 		else:
 			return arg
 
@@ -99,9 +154,9 @@ def args_str(args, kwargs, max=20, app="...", repr_args=True):
 			return ""
 
 def argspec_str(name, argspec_od):
-	"""
-	test more, make use of OrderedDict property of argspec._asdict()
-	"""
+	# type: (name, OrderedDict) -> str
+
+	""" test more, make use of OrderedDict property of argspec._asdict() """
 
 	def prepend_if(obj, prep):
 		if obj:
@@ -118,10 +173,12 @@ def argspec_str(name, argspec_od):
 	else:
 		args = d["args"]
 		kwargs = OrderedDict()
-	vars = ", ".join(i for i in (args_str(args, kwargs, repr_args=False), prepend_if(d["varargs"], "*"), prepend_if(d["keywords"], "**")) if i)
-	return "{}({})".format(name, vars)
+	arguments = ", ".join(i for i in (args_str(args, kwargs, repr_args=False), prepend_if(d["varargs"], "*"), prepend_if(d["keywords"], "**")) if i)
+	return "{}({})".format(name, arguments)
 
 def pprint_introspect(callables):
+	# type: (Iterable[Iterable[dict]], ) -> None
+
 	for c in callables:
 		for argspec in c:
 			name = argspec.pop("name")
