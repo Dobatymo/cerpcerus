@@ -2,7 +2,12 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import queue, logging
 
-from twisted.internet import defer, reactor, protocol
+from twisted.internet import defer
+
+from future.utils import PY2
+
+if PY2:
+	StopAsyncIteration = Exception
 
 logger = logging.getLogger(__name__)
 
@@ -10,7 +15,7 @@ logger = logging.getLogger(__name__)
 call self.transport.pauseProducing() and self.transport.resumeProducing() if stream is sending too fast (queue gets too large
 """
 
-class MultiDeferredIterator(object):
+class MultiDeferredIterator(object): # inherit from RemoteObjectGeneric?
 
 	"""should this be made pause/resume-able?
 	should be stoppable for sure
@@ -18,20 +23,27 @@ class MultiDeferredIterator(object):
 
 	if this stops the producer/transport, it will be stopped for all streams.
 	It would be better to have on collector with one queue for all streams, so it can be stopped with regard to all streams.
-	if every single iterator can pause/resume, there will be nterference among them
+	if every single iterator can pause/resume, there will be interference among them
 	"""
 
-	def __init__(self):
+	def __init__(self, conn, sequid, classname):
+		self._conn = conn
+		self._sequid = sequid
+		self._classname = classname
+
 		self.queue = queue.Queue()
 		self.deferred = None
 		self.transport = None # interfaces.IPushProducer
 
 	# called by client
 
+	def abort(self): # this should be called from the generators .close() method as well to stop the server from sending
+		self._conn._cancel_stream(self._sequid)
+
 	def __iter__(self):
 		return self
 
-	def next(self): # __next__ python3, this can hang if user is not careful
+	def __next__(self): # this can hang if user is not careful
 		#self.transport.resumeProducing() # if queue too empty
 		try:
 			deferred = self.queue.get_nowait()
@@ -39,6 +51,24 @@ class MultiDeferredIterator(object):
 		except queue.Empty:
 			self.deferred = defer.Deferred()
 			return self.deferred
+
+	next = __next__
+
+	def __aiter__(self):
+		return self
+
+	@defer.inlineCallbacks
+	def __anext__(self):
+		try:
+			try:
+				result = yield self.queue.get_nowait() # or yield from?
+				defer.returnValue(result) # return result
+			except queue.Empty:
+				self.deferred = defer.Deferred()
+				result = yield self.deferred # or yield from?
+				defer.returnValue(result) # return result
+		except StopIteration: # translate, as interface which is used by the user (iter/aiter) is unknown at time of raise
+			raise StopAsyncIteration()
 
 	def stop(self):
 		pass
@@ -71,68 +101,49 @@ class MultiDeferredIterator(object):
 	def completed(self):
 		return self.errback(StopIteration())
 
-""" py 3 only
-class AsyncMultiDeferredIterator:
+	def async_completed(self):
+		return self.errback(StopAsyncIteration())
 
-	def __init__(self):
-		self.queue = queue.Queue()
-		self.deferred = None
+# tests
 
-	def __aiter__(self):
-		return self
+from twisted.internet import reactor, protocol
 
-	async def __anext__(self):
-		try:
-			result = await self.queue.get_nowait()
-			if result == "stop":
-				raise StopAsyncIteration
-			return result
-		except queue.Empty:
-			self.deferred = defer.Deferred()
-			result = await self.deferred
-			if result == "stop":
-				raise StopAsyncIteration
-			return result
-
-	def callback(self, val): # called multiple times
-		if self.deferred and not self.deferred.called:
-			print("call directly")
-			self.deferred.callback(val)
-		else:
-			print("add to queue")
-			self.queue.put_nowait(defer.succeed(val))
-
-	def errback(self, val):
-		if self.deferred and not self.deferred.called:
-			print("call directly")
-			self.deferred.errback(val)
-		else:
-			print("add to queue")
-			self.queue.put_nowait(defer.fail(val))
-
+# python >= 3.5
+""" syntax error for older python
 async def async_recv_stream(async_iter):
+	from twisted.internet import error
+
 	print("start")
-	async for deferred in async_iter:
-		print(deferred)
+	try:
+		async for result in async_iter:
+			print(result)
+			await sleep(1)
+			print("slept for a second")
+
+	except error.ConnectionDone:
+		print("ConnectionDone")
+	except error.ConnectionLost:
+		print("ConnectionLost")
 	print("end")
-	return True
 """
 
-from .utils import sleep
-
+# python <= 3.4
 @defer.inlineCallbacks
 def recv_stream(async_iter):
+	print("start")
 	for deferred in async_iter:
 		try:
 			result = yield deferred
 			print(result)
 		except StopIteration:
-			print("stop")
+			print("end")
 			break
 		except GeneratorExit:
 			logger.exception("GeneratorExit in recv")
+			break
 		except Exception:
 			logger.exception("Exception in recv")
+			break
 		yield sleep(1)
 		print("slept for a second")
 	reactor.stop()
@@ -144,9 +155,13 @@ class Recv(protocol.Protocol):
 
 	def dataReceived(self, data):
 		if data == b"\x1b": # ESCAPE in TELNET
-			self.mdit.stop()
+			#self.mdit.stop()
+			self.mdit.completed()
 		else:
 			self.mdit.callback(data)
+
+	def connectionLost(self, reason):
+		self.mdit.errback(reason)
 
 class RecvFactory(protocol.Factory):
 
@@ -156,18 +171,19 @@ class RecvFactory(protocol.Factory):
 	def buildProtocol(self, addr):
 		return Recv(self.mdit)
 
-def main1():
+def main1(): # connect with telnet
 	mdit = MultiDeferredIterator()
 	reactor.listenTCP(8000, RecvFactory(mdit))
 	reactor.callWhenRunning(recv_stream, mdit)
 	reactor.run()
 
-def main2():
-	import asyncio
-	mdit = AsyncMultiDeferredIterator()
+def main2(): # connect with telnet
+	from twisted.internet import task
+	mdit = MultiDeferredIterator()
 	reactor.listenTCP(8000, RecvFactory(mdit))
-	reactor.callWhenRunning(defer.Deferred.fromFuture(asyncio.ensure_future(async_recv_stream)), mdit)
+	task.react(lambda reactor: defer.ensureDeferred(async_recv_stream(mdit)))
 	reactor.run()
 
 if __name__ == "__main__":
+	from utils import sleep
 	main1()

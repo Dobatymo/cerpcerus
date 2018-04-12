@@ -1,4 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
+from builtins import str
 
 from future.utils import iteritems
 
@@ -45,6 +46,7 @@ class CallAnyPublic(object):
 	"""Baseclass which delegates method calls based on leading "_"."""
 
 	def __getattr__(self, name): # only gets invoked for attributes that are not already defined. __getattribute__ would be called always
+		# name is byte string in python 2 and unicode string in python 3
 		if not name.startswith("_"):
 			return self._callpublic(name)
 		else:
@@ -84,11 +86,10 @@ class RemoteObjectGeneric(CallAnyPublic):
 		return partial(self._call, self._alias.get(name, name))
 
 	def _callprivate(self, name):
-	
 		"""called from user, so return user friendly exception """
-	
+
 		# vs: __class__.__name__?
-		raise AttributeError("{} instance has no attribute '{}'".format(type(self).__name__, name))
+		raise AttributeError("{} instance has no attribute '{}'".format(type(self).__name__, name)) # str(name) needed for python2?
 
 	@property
 	def _connid(self):
@@ -134,27 +135,37 @@ class RemoteObject(RemoteObjectGeneric):
 		RemoteObjectGeneric.__init__(self, conn)
 
 	def _call(self, _name, *args, **kwargs):
-		# type: (unicode, *Any, **Any) -> RemoteResultDeferred
-		_name = unicode(_name)
+		# type: (str, *Any, **Any) -> RemoteResultDeferred
+		_name = str(_name) # this is needed for python2 is it?
 		return self._conn._call(_name, *args, **kwargs)
 
 	def _call_with_streams(self, _name, *args, **kwargs):
-		# type: (unicode, *Any, **Any) -> RemoteResultDeferred
-		_name = unicode(_name)
+		# type: (str, *Any, **Any) -> RemoteResultDeferred
+		_name = str(_name)
 		return self._conn._call_with_streams(_name, *args, **kwargs)
 
 	def _notify(self, _name, *args, **kwargs):
-		# type: (unicode, *Any, **Any) -> None
-		_name = unicode(_name)
+		# type: (str, *Any, **Any) -> None
+		_name = str(_name)
 		self._conn._notify(_name, *args, **kwargs)
 
+	def _notify_with_streams(self, _name, *args, **kwargs):
+		# type: (str, *Any, **Any) -> None
+		_name = str(_name)
+		self._conn._notify_with_streams(_name, *args, **kwargs)
+
 	def _stream(self, _name, *args, **kwargs): # could return a async iterator in the far future
-		# type: (unicode, *Any, **Any) -> MultiDeferredIterator
-		_name = unicode(_name)
+		# type: (str, *Any, **Any) -> MultiDeferredIterator
+		_name = str(_name)
 		return self._conn._stream(_name, *args, **kwargs)
 
+	def _stream_with_streams(self, _name, *args, **kwargs): # could return a async iterator in the far future
+		# type: (str, *Any, **Any) -> MultiDeferredIterator
+		_name = str(_name)
+		return self._conn._stream_with_streams(_name, *args, **kwargs)
+
 	def __repr__(self):
-		# type: () -> unicode
+		# type: () -> str
 		return "'<RemoteObject object to {} at {}>'".format(self._conn.name, self._conn.addr)
 
 	def __dir__(self):
@@ -169,29 +180,42 @@ class RemoteInstance(RemoteObjectGeneric):
 
 	def __init__(self, conn, objectid, classname):
 		RemoteObjectGeneric.__init__(self, conn)
-		assert isinstance(classname, unicode)
+		assert isinstance(classname, str)
 		self._objectid = objectid
 		self._classname = classname
 
 	def _call(self, _name, *args, **kwargs):
-		# type: (unicode, *Any, **Any) -> RemoteResultDeferred
+		# type: (str, *Any, **Any) -> RemoteResultDeferred
+		_name = str(_name) # this is needed for python2 is it?
 		return self._conn._callmethod(self._objectid, _name, *args, **kwargs)
 
 	def _call_with_streams(self, _name, *args, **kwargs):
-		# type: (unicode, *Any, **Any) -> RemoteResultDeferred
-		_name = unicode(_name)
+		# type: (str, *Any, **Any) -> RemoteResultDeferred
+		_name = str(_name)
 		return self._conn._callmethod_with_streams(_name, *args, **kwargs)
 
 	def _notify(self, _name, *args, **kwargs):
-		# type: (unicode, *Any, **Any) -> None
+		# type: (str, *Any, **Any) -> None
+		_name = str(_name)
 		self._conn._notifymethod(self._objectid, _name, *args, **kwargs)
 
+	def _notify_with_streams(self, _name, *args, **kwargs):
+		# type: (str, *Any, **Any) -> None
+		_name = str(_name)
+		self._conn._notifymethod_with_streams(self._objectid, _name, *args, **kwargs)
+
 	def _stream(self, _name, *args, **kwargs): # could return a async iterator in the far future
-		# type: (unicode, *Any, **Any) -> MultiDeferredIterator
+		# type: (str, *Any, **Any) -> MultiDeferredIterator
+		_name = str(_name)
 		return self._conn._streammethod(self._objectid, _name, *args, **kwargs)
 
+	def _stream_with_streams(self, _name, *args, **kwargs): # could return a async iterator in the far future
+		# type: (str, *Any, **Any) -> MultiDeferredIterator
+		_name = str(_name)
+		return self._conn._streammethod_with_streams(self._objectid, _name, *args, **kwargs)
+
 	def __repr__(self):
-		# type: () -> unicode
+		# type: () -> str
 		return "'<RemoteInstance object {} [{}] to {} at {}>'".format(self._classname, self._objectid, self._conn.name, self._conn.addr)
 
 	def __dir__(self):
@@ -219,17 +243,24 @@ class RemoteResult(RemoteObjectGeneric):
 
 	def __init__(self, conn, sequid, classname):
 		RemoteObjectGeneric.__init__(self, conn)
+		assert isinstance(classname, str)
 		self._sequid = sequid
 		self._classname = classname
 
 	def _call(self, _name, *args, **kwargs):
-		return self._conn._callmethod_onresult(self._sequid, _name, *args, **kwargs) # type: CallOnDeferred
+		# type: (str, *Any, **Any) -> RemoteResultDeferred
+		_name = str(_name) # this is needed for python2 is it?
+		return self._conn._callmethod_by_result(self._sequid, _name, *args, **kwargs)
 
 	def _notify(self, _name, *args, **kwargs):
-		self._conn._notifymethod_onresult(self._sequid, _name, *args, **kwargs) # type: None
+		# type: (str, *Any, **Any) -> None
+		_name = str(_name)
+		self._conn._notifymethod_by_result(self._sequid, _name, *args, **kwargs)
 
 	def _stream(self, _name, *args, **kwargs): # could return a async iterator in the far future
-		return self._conn._streammethod_onresult(self._sequid, _name, *args, **kwargs) # type: MultiDeferredIterator
+		# type: (str, *Any, **Any) -> MultiDeferredIterator
+		_name = str(_name)
+		return self._conn._streammethod_by_result(self._sequid, _name, *args, **kwargs)
 
 	def __repr__(self):
 		return "'<RemoteResult object {} [{}] to {} at {}>'".format(self._classname, self._sequid, self._conn.name, self._conn.addr)
@@ -241,8 +272,7 @@ class RemoteResult(RemoteObjectGeneric):
 	def __del__(self): # called when garbage collected
 		# RemoteObjectGeneric.__del__() # should be called, but doesn't exist
 		try:
-			#self._conn._delinstanceonresult(self._sequid) # this tries to delete results which are not actually objects
-			pass
+			self._conn._delinstance_by_result(self._sequid)
 		except NotAuthenticated:
 			pass
 
@@ -293,7 +323,7 @@ def call_and_catch_signature_error(_attr, *args, **kwargs):
 		return _attr(*args, **kwargs)
 	except TypeError as e:
 		try:
-			signature(_attr).bind(*args, **kwargs) #do sig test only in error case to preserve resources on successful calls
+			signature(_attr).bind(*args, **kwargs) # do sig test only in error case to preserve resources on successful calls
 			raise
 		except TypeError:
 			raise RPCInvalidArguments(e)
@@ -331,11 +361,11 @@ class Service(object):
 
 	@classmethod
 	def _aliases(cls, aliases):
-	
+
 		""" this is intended to be a decorator used for functions in services.
 			yet the decorator is applied at class construction time and has thus no
 			access to self. but class wide aliases would be bad."""
-	
+
 		def decorator(func):
 			for alias in aliases:
 				cls._alias[alias] = func.__name__
@@ -419,7 +449,7 @@ class Service(object):
 		except KeyError:
 			raise RPCInvalidObject("No object with id {}".format(objectid))
 
-	def _deleteAllObjects(self, connid):
+	def _delete_all_objects(self, connid):
 		"""Deletes all objects created by this connection."""
 		try:
 			self._objects = {oid: (obj, connid_) for oid, (obj, connid_) in iteritems(self._objects) if connid_ != connid}
@@ -451,7 +481,7 @@ class DebugService(Service):
 	# generator
 	def random(self, size, num):
 		return random(size, num)
-	
+
 	def echo(self, data):
 		return data
 

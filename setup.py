@@ -16,6 +16,7 @@ setup(name="cerpcerus",
 	packages=["cerpcerus"],
 	test_suite="test",
 	install_requires=[
+		"future",
 		"twisted",
 		"msgpack-python",
 		"pyOpenSSL",

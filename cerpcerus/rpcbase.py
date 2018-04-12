@@ -1,4 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
+from builtins import str
 
 from future.utils import iteritems
 
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 """
 debug: errors which result from wrong usage on remote side (eg. calling non existing function)
 info: errors which could result from above or below case (eg. accessing invalid object ids)
-warning: errors which result from intentional wrong usage of protocol (eg. sending wrongly formated data)
+warning: errors which result from intentional wrong usage of protocol (eg. sending wrongly formatted data)
 exception: unexpected exceptions which point to source code errors
 error:
 """
@@ -93,7 +94,7 @@ class SameFriend(IFriends):
 		return self.name
 
 	def get_connection(self, name):
-		return None
+		return
 
 	def update_by_addr(self, addr, conn):
 		pass
@@ -119,7 +120,7 @@ class AllFriends(IFriends):
 			return self.friends[public_key]
 
 	def get_connection(self, name):
-		return None
+		return
 
 	def update_by_addr(self, addr, conn):
 		pass
@@ -139,7 +140,7 @@ class Streamable(Generator):
 		pass
 
 	def send(self, value):
-		raise NotImplementedError
+		raise NotImplementedError()
 
 	def throw(self, mytype, value=None, traceback=None):
 		raise NotImplementedError()
@@ -215,7 +216,7 @@ class RPCPullProducer:
 
 	"""
 	it should be able to use this producer on both sides.
-	for sending rpc requests and streams, and replying to rpc and stream requests.
+	for sending RPC requests and streams, and replying to RPC and stream requests.
 
 	in the worst case, the producer is un/re-registered all the time. is this performance relevant?
 
@@ -246,7 +247,7 @@ class RPCPullProducer:
 			return msgpack.ExtType(self.StreamableID, b"")
 		return obj
 
-	def add(self, senders, iterable): # called from rpc
+	def add(self, senders, iterable): # called from RPC
 		if self.closed:
 			raise ConnectionClosedError("No new streams can be added")
 
@@ -338,6 +339,24 @@ class PullProducerQueue(RPCPullProducer):
 		send_error(RPCBase.ERRORS.Deferred)
 		# stop on error?
 
+	def cancel(self, sequid):
+		raise NotImplementedError("Cannot cancel streams in queue yet...")
+
+		# first try to stop currently active iterable
+		senders, sequid_, iterable = self.current
+		if sequid == sequid_:
+			self.current = None
+			send_error(RPCBase.ERRORS.Cancelled)
+			return
+		
+		# next, remove item from queue
+		pass
+		return
+		
+		# last
+		# sequid not found, call probably already completed or sequid was invalid in the first place
+		logger.debug("Tried to cancel invalid stream [%s]", sequid) # fixme: is .debug() here correct?
+
 	def resumeProducing(self):
 		try:
 			if not self.current:
@@ -374,6 +393,23 @@ class RemoteResultDeferred(defer.Deferred, RemoteResult):
 	def __init__(self, conn, sequid, classname):
 		defer.Deferred.__init__(self)
 		RemoteResult.__init__(self, conn, sequid, classname)
+
+	def __getattr__(self, name):
+		# This fix works and is needed, because Deferred uses `getattr` internally.
+		# So calls are redirected back to the correct class.
+		# External calls should work as intended.
+		return getattr(defer.Deferred, name)
+
+	def __repr__(self):
+		return "'<RemoteResultDeferred object {} [{}] to {} at {}>'".format(self._classname, self._sequid, self._conn.name, self._conn.addr)
+
+	def abort(self):
+		# should this method be called `cancel`? Deferred.cancel already exists and is called by timeout for example.
+		"""cancels the remote call. will only work if the server using a queuing system,
+			threads or the like for deferreds and the abort call is processed
+			before the call in the queue. """
+
+		self._conn._cancel_call(self._sequid) # _conn from RemoteObjectGeneric
 
 class RPCProtocolBase(object):
 
@@ -412,31 +448,38 @@ class MessageTypes:
 	# CLIENT TO SERVER
 	NOTIFY = 1
 	NOTIFYMETHOD = 2
-	CALL = 3
-	CALL_WITH_STREAMS = 4
-	CALLMETHOD = 5
-	CALLMETHOD_WITH_STREAMS = 6
-	DELINSTANCE = 7
+	NOTIFYMETHOD_BY_RESULT = 3
 
-	STREAM_ARGUMENT = 11
-	ARGUMENT_END = 12
-	ARGUMENT_ERROR = 13
+	NOTIFY_WITH_STREAMS = 4
+	NOTIFYMETHOD_WITH_STREAMS = 5
+	NOTIFYMETHOD_BY_RESULT_WITH_STREAMS = 6
+
+	CALL = 11
+	CALLMETHOD = 12
+	CALLMETHOD_BY_RESULT = 13
+
+	CALL_WITH_STREAMS = 14
+	CALLMETHOD_WITH_STREAMS = 15
+	CALLMETHOD_BY_RESULT_WITH_STREAMS = 16
+
+	DELINSTANCE = 21
+	DELINSTANCE_BY_RESULT = 22
+	CANCEL_CALL = 23
+	CANCEL_STREAM = 24
+
+	STREAM_ARGUMENT = 25
+	ARGUMENT_END = 26
+	ARGUMENT_ERROR = 27
 
 	# SERVER TO CLIENT
-	RESULT = 21
-	OBJECT = 22
-	ERROR = 23
-	STREAM_RESULT = 24
-	STREAM_ERROR = 25
-	STREAM_END = 26
-
-	NOTIFYMETHOD_ON_RESULT = 31
-	CALLMETHOD_ON_RESULT = 32
-	CALLMETHOD_WITH_STREAMS_ON_RESULT = 33
-	DELINSTANCE_ON_RESULT = 34
+	RESULT = 31
+	OBJECT = 32
+	ERROR = 33
+	STREAM_RESULT = 34
+	STREAM_ERROR = 35
+	STREAM_END = 36
 
 class RPCBase(RPCProtocolBase):
-
 
 	class ERRORS: #todo: named tuple?
 		GeneralError = 0
@@ -461,6 +504,7 @@ class RPCBase(RPCProtocolBase):
 		self._deferreds = {} # deferreds saved on client side to process normal calls
 		self._multideferreds = {} # deferreds saved on client side to process streaming calls
 		self._calldeferreds = {} # deferreds saved on server side to process incoming streaming calls
+		self.waitingcalls = {} # deferreds saved on server side which are not completed yet
 		self.results = {} # map sequids to objectids
 		self.authed = False
 		self.closed = None
@@ -497,21 +541,60 @@ class RPCBase(RPCProtocolBase):
 			return Streamable()
 		return obj
 
+	# argument conversion for streams
+
+	@staticmethod
+	def filter_args(args, sequid):
+		for arg_pos, arg in enumerate(args): # only handle positional args for now
+			if isinstance(arg, GeneratorType):
+				self.stream_msgpack_call(sequid, arg_pos, arg)
+				yield Streamable() # (sequid, arg_pos)
+			else:
+				yield arg
+
+	@staticmethod
+	def defilter_args(sequid, name, args):
+		""" this could be put in msgpack custom unpacking also.
+			but this would require sending the sequid and argument position.
+			does not handles keyword arguments right now.
+		"""
+
+		for arg_pos, arg in enumerate(args):
+			if isinstance(arg, Streamable):
+				deferred = MultiDeferredIterator()
+				# fixme: what are the correct arguments here?
+				# should it be possible to cancel specific arg_pos streams, or just all of them?
+				#deferred = MultiDeferredIterator(self, sequid, name)
+				self._calldeferreds[(sequid, arg_pos)] = (deferred, name)
+				#self._calldeferreds[sequid][arg_pos] = (deferred, name)
+				yield deferred
+			else:
+				yield arg
+
 	### converting messages <-> calls
 
-	def _success(self, sequid, result): # check if GeneratorType also
+	def _success(self, sequid, result): # check for GeneratorType also
+		del self.waitingcalls[sequid]
 		if isinstance(result, ObjectId):
 			self.send_msgpack((MessageTypes.OBJECT, sequid, int(result))) # there is no automatic conversion for ObjectId so far
 		else:
 			self.send_msgpack((MessageTypes.RESULT, sequid, result))
 
 	def _failure(self, sequid, failure):
-		msg = (MessageTypes.ERROR, sequid, self.ERRORS.Deferred, None)
-		logger.exception(failure.getErrorMessage())
+		del self.waitingcalls[sequid]
+
+		if isinstance(failure, defer.CancelledError):
+			# because Deferred()s are not created by library code, we cannot pass a canceller
+			# parameter to initializer and thus have to translate cancelled errors here.
+			# the canceller set by user code will be called so the operation can be canceled.
+			msg = (MessageTypes.ERROR, sequid, self.ERRORS.Cancelled, None)
+		else:
+			msg = (MessageTypes.ERROR, sequid, self.ERRORS.Deferred, None)
+			logger.exception(failure.getErrorMessage())
 		self.send_msgpack(msg)
 
 	def proc_notifymethod(self, objectid, name, args, kwargs):
-		assert isinstance(name, unicode)
+		assert isinstance(name, str)
 		assert self.service
 
 		try:
@@ -528,7 +611,7 @@ class RPCBase(RPCProtocolBase):
 			logger.exception("%sRPC %s(%s) failed", L, name, args_str(args, kwargs))
 
 	def proc_call(self, sequid, name, args, kwargs):
-		assert isinstance(name, unicode)
+		assert isinstance(name, str)
 		assert self.service
 
 		try:
@@ -537,9 +620,11 @@ class RPCBase(RPCProtocolBase):
 			result = self.service._call(self.connid, name, *args, **kwargs)
 			print("local yielded result of type:", type(result))
 			if isinstance(result, defer.Deferred):
+				self.waitingcalls[sequid] = result
 				result.addCallbacks(partial(self._success, sequid), partial(self._failure, sequid))
 				return
 			elif isinstance(result, ObjectId):
+				self.results[sequid] = result
 				msg = (MessageTypes.OBJECT, sequid, int(result)) # there is no automatic conversion for ObjectId so far
 			elif isinstance(result, GeneratorType):
 				try:
@@ -568,17 +653,27 @@ class RPCBase(RPCProtocolBase):
 		return msg
 
 	def proc_callmethod(self, sequid, objectid, name, args, kwargs):
-		assert isinstance(name, unicode)
+		assert isinstance(name, str)
 		assert self.service
 
 		try:
 			result = self.service._callmethod(self.connid, objectid, name, *args, **kwargs)
+			print("local yielded result of type:", type(result))
 			if isinstance(result, defer.Deferred):
+				self.waitingcalls[sequid] = result
 				result.addCallbacks(partial(self._success, sequid), partial(self._failure, sequid))
-				return None
+				return
 			elif isinstance(result, ObjectId):
 				self.results[sequid] = result
 				msg = (MessageTypes.OBJECT, sequid, int(result))
+			elif isinstance(result, GeneratorType):
+				try:
+					self.stream_msgpack(sequid, result)
+					return
+				except ResourceExhaustedError:
+					msg = (MessageTypes.ERROR, sequid, self.ERRORS.ResourceExhausted, None)
+				except ConnectionClosedError:
+					logger.warning("Tried to stream result on closed connection")
 			else:
 				msg = (MessageTypes.RESULT, sequid, result)
 
@@ -600,15 +695,23 @@ class RPCBase(RPCProtocolBase):
 
 		return msg
 
+	def proc_delinstance(self, objectid):
+		try:
+			self.service._delete(self.connid, objectid)
+		except RPCInvalidObject:
+			logger.info("Tried to delete invalid Object %s", objectid)
+		except Exception:
+			logger.exception("RPC delete object %s failed", objectid)
+
 	def recv_msgpack(self, msg):
 		try:
 			type = msg[0]
 		except (IndexError, TypeError):
-			logger.warning("Received invalid formated rpc message")
+			logger.warning("Received invalid formatted RPC message")
 			return
 		except: # replace with Exception for py3
 			# import exceptions #msgpack 0.4.8 throws TypeError from this module...
-			logger.exception("Received invalid formated rpc message")
+			logger.exception("Received invalid formatted RPC message")
 			return
 
 		"""
@@ -617,7 +720,6 @@ class RPCBase(RPCProtocolBase):
 		track of the objects. but notify calls don't have sequids, so they cannot be associated (only real calls have sequids).
 		also no error messages can be send in case something goes wrong with notifies
 		=> so i guess normal calls are the only solution
-
 		"""
 
 		try:
@@ -648,7 +750,7 @@ class RPCBase(RPCProtocolBase):
 				else:
 					logger.debug("No Service")
 
-			elif type == MessageTypes.NOTIFYMETHOD_ON_RESULT:
+			elif type == MessageTypes.NOTIFYMETHOD_BY_RESULT:
 				previous_sequid, name, args, kwargs = msg[1:]
 
 				logger.debug("notifying local method on result [%s].%s(%s)", previous_sequid, name, args_str(args, kwargs))
@@ -660,6 +762,8 @@ class RPCBase(RPCProtocolBase):
 						logger.info("Invalid Object %s", previous_sequid)
 				else:
 					logger.debug("No Service")
+
+			# *_WITH_STREAMS
 
 			elif type == MessageTypes.CALL:
 				sequid, name, args, kwargs = msg[1:]
@@ -680,22 +784,7 @@ class RPCBase(RPCProtocolBase):
 
 				logger.debug("calling local with stream %s(%s) [%s]", name, args_str(args, kwargs), sequid)
 				if self.service:
-
-					def defilter_args(args, sequid):
-						""" this could be put in msgpack custom unpacking also.
-							but this would require sendin the sequid and argument position
-						"""
-						for arg_pos, arg in enumerate(args):
-							if isinstance(arg, Streamable):
-								deferred = MultiDeferredIterator()
-								self._calldeferreds[(sequid, arg_pos)] = (deferred, name)
-								#self._calldeferreds[sequid][arg_pos] = (deferred, name)
-								yield deferred
-							else:
-								yield arg
-
-					args = defilter_args(args, sequid) # only handle positional args for now
-
+					args = self.defilter_args(sequid, name, args) # only handle positional args for now
 					msg = self.proc_call(sequid, name, args, kwargs)
 					if msg is None:
 						return
@@ -719,7 +808,22 @@ class RPCBase(RPCProtocolBase):
 
 				self.send_msgpack(msg)
 
-			elif type == MessageTypes.CALLMETHOD_ON_RESULT:
+			elif type == MessageTypes.CALLMETHOD_WITH_STREAMS:
+				sequid, objectid, name, args, kwargs = msg[1:]
+
+				logger.debug("calling local method with stream [%s].%s(%s) [%s]", objectid, name, args_str(args, kwargs), sequid)
+				if self.service:
+					args = self.defilter_args(sequid, name, args) # only handle positional args for now
+					msg = self.proc_callmethod(sequid, objectid, name, args, kwargs)
+					if msg is None:
+						return
+				else:
+					msg = (MessageTypes.ERROR, sequid, self.ERRORS.NoService, None)
+					logger.debug("No Service [%s]", sequid)
+
+				self.send_msgpack(msg)
+
+			elif type == MessageTypes.CALLMETHOD_BY_RESULT:
 				sequid, previous_sequid, name, args, kwargs = msg[1:]
 
 				logger.debug("calling local method on result [%s].%s(%s) [%s]", previous_sequid, name, args_str(args, kwargs), sequid)
@@ -729,9 +833,29 @@ class RPCBase(RPCProtocolBase):
 						msg = self.proc_callmethod(sequid, objectid, name, args, kwargs)
 						if msg is None:
 							return
-					except KeyError:
+					except KeyError: # sequid does not reference a object
 						msg = (MessageTypes.ERROR, sequid, self.ERRORS.InvalidObject, None)
-						logger.info("Invalid Object %s", previous_sequid)
+						logger.info("Invalid Object [%s]", previous_sequid)
+				else:
+					msg = (MessageTypes.ERROR, sequid, self.ERRORS.NoService, None)
+					logger.debug("No Service [%s]", sequid)
+
+				self.send_msgpack(msg)
+
+			elif type == MessageTypes.CALLMETHOD_BY_RESULT_WITH_STREAMS:
+				sequid, previous_sequid, name, args, kwargs = msg[1:]
+
+				logger.debug("calling local method on result [%s].%s(%s) [%s]", previous_sequid, name, args_str(args, kwargs), sequid)
+				if self.service:
+					try:
+						objectid = self.results[previous_sequid]
+						args = self.defilter_args(sequid, name, args) # only handle positional args for now
+						msg = self.proc_callmethod(sequid, objectid, name, args, kwargs)
+						if msg is None:
+							return
+					except KeyError: # sequid does not reference a object
+						msg = (MessageTypes.ERROR, sequid, self.ERRORS.InvalidObject, None)
+						logger.info("Invalid Object [%s]", previous_sequid)
 				else:
 					msg = (MessageTypes.ERROR, sequid, self.ERRORS.NoService, None)
 					logger.debug("No Service [%s]", sequid)
@@ -743,16 +867,11 @@ class RPCBase(RPCProtocolBase):
 
 				logger.debug("deleting local instance [%s]", objectid)
 				if self.service:
-					try:
-						self.service._delete(self.connid, objectid)
-					except RPCInvalidObject:
-						logger.info("Tried to delete invalid Object %s", objectid)
-					except Exception:
-						logger.exception("RPC delete object %s failed", objectid)
+					self.proc_delinstance(objectid)
 				else:
 					logger.debug("No Service")
 
-			elif type == MessageTypes.DELINSTANCE_ON_RESULT:
+			elif type == MessageTypes.DELINSTANCE_BY_RESULT:
 				previous_sequid, = msg[1:]
 
 				logger.debug("deleting local instance on result [%s]", previous_sequid)
@@ -763,12 +882,28 @@ class RPCBase(RPCProtocolBase):
 						logger.info("Invalid Object %s", previous_sequid)
 						return
 
+					self.proc_delinstance(objectid)
+				else:
+					logger.debug("No Service")
+
+			elif type == MessageTypes.CANCEL_CALL: # should this return a msg or not? without, canceling cannot be awaited directly
+				sequid, = msg[1:]
+
+				logger.debug("canceling call [%s]", previous_sequid)
+				if self.service:
 					try:
-						self.service._delete(self.connid, objectid)
-					except RPCInvalidObject:
-						logger.info("Tried to delete invalid Object %s", objectid)
-					except Exception:
-						logger.exception("RPC delete object %s failed", objectid)
+						self.waitingcalls[sequid].cancel()
+					except KeyError:
+						logger.debug("Tried to cancel invalid call [%s]", sequid)
+				else:
+					logger.debug("No Service")
+
+			elif type == MessageTypes.CANCEL_STREAM: # should this return a msg or not? without, canceling cannot be awaited directly
+				sequid, = msg[1:]
+
+				logger.debug("canceling stream [%s]", sequid)
+				if self.service:
+					self.sender.cancel(sequid)
 				else:
 					logger.debug("No Service")
 
@@ -787,7 +922,18 @@ class RPCBase(RPCProtocolBase):
 			elif type == MessageTypes.ARGUMENT_ERROR:
 				sequid, arg_pos, errortype, errormsg = msg[1:]
 
-				raise RuntimeError("ARGUMENT_ERROR not implemented yet")
+				try:
+					deferred, name = self._calldeferreds.pop((sequid, arg_pos))
+					logger.debug("Received arg stream error %s for %s([%s]) [%s], deleting iterator", errortype, name, arg_pos, sequid)
+					# what errors can happen?
+					if errortype == self.ERRORS.UserError:
+						deferred.errback(RPCUserError(*errormsg))
+					elif errortype == self.ERRORS.GeneralError:
+						deferred.errback(Exception("{}() failed in an unexpected way".format(name)))
+					else:
+						deferred.errback(RPCError("Received unknown error"))
+				except KeyError:
+					logger.info("Received arg stream error with unknown SeqID [%s] or argument number (%s)", sequid, arg_pos)
 
 			elif type == MessageTypes.ARGUMENT_END:
 				sequid, arg_pos = msg[1:]
@@ -857,8 +1003,8 @@ class RPCBase(RPCProtocolBase):
 
 				"""
 				stream cannot have ResourceExhausted
-				fixme: stream calls which fail before the rpc can decide it's a stream, will return a ERROR, not STREAM_ERROR (NoSuchFunction, WrongArguments, InvalidObject)
-				
+				fixme: stream calls which fail before the RPC can decide it's a stream, will return a ERROR, not STREAM_ERROR (NoSuchFunction, WrongArguments, InvalidObject)
+
 				could there be errors which are not caused by exceptions in the iterator
 				and thus don't stop the iterator and thus continue sending?
 				Maybe some informational messages for the client? then deferreds cannot be pop()'ed
@@ -889,7 +1035,7 @@ class RPCBase(RPCProtocolBase):
 			else:
 				logger.warning("Unknown message type received: %s", type)
 		except ValueError:
-			logger.warning("Received invalid formated rpc message")
+			logger.warning("Received invalid formatted RPC message")
 
 	def send_msgpack(self, msg):
 		self.sender.send_msgpack(msg)
@@ -912,105 +1058,144 @@ class RPCBase(RPCProtocolBase):
 
 	@ValidateConnection
 	def _notify(self, _name, *args, **kwargs):
+		assert isinstance(_name, str)
+
 		logger.debug("notifying remote %s(%s)", _name, args_str(args, kwargs))
 		msg = (MessageTypes.NOTIFY, _name, args, kwargs)
 		self.send_msgpack(msg)
 
 	@ValidateConnection
 	def _notifymethod(self, _objectid, _name, *args, **kwargs):
+		assert isinstance(_name, str)
+
 		logger.debug("notifying remote method [%s].%s(%s)", _objectid, _name, args_str(args, kwargs))
 		msg = (MessageTypes.NOTIFYMETHOD, _objectid, _name, args, kwargs)
 		self.send_msgpack(msg)
 
 	@ValidateConnection
+	def _notifymethod_by_result(self, prev_sequid, _name, *args, **kwargs):
+		assert isinstance(_name, str)
+
+		logger.debug("notifying remote method on result [%s].%s(%s)", prev_sequid, _name, args_str(args, kwargs))
+		msg = (MessageTypes.NOTIFYMETHOD_BY_RESULT, prev_sequid, _name, args, kwargs)
+		self.send_msgpack(msg)
+
+	# _notify_with_streams
+	# _notifymethod_with_streams
+	# _notifymethod_by_result_with_streams
+
+	# helper for all kind of calls which return non-streaming results
+	def process_call_and_prepare_deferred(self, sequid, _name, msg):
+		assert sequid not in self._deferreds, "Must not reuse sequence id"
+		deferred = RemoteResultDeferred(self, sequid, _name)
+		self._deferreds[sequid] = (deferred, _name)
+		self.send_msgpack(msg)
+		return deferred
+
+	@ValidateConnection
 	def _call(self, _name, *args, **kwargs):
-		assert isinstance(_name, unicode), type(_name)
+		assert isinstance(_name, str)
 
 		sequid = next(self._sequid)
 		logger.debug("calling remote %s(%s) [%s]", _name, args_str(args, kwargs), sequid)
 		msg = (MessageTypes.CALL, sequid, _name, args, kwargs)
-		assert sequid not in self._deferreds, "Must not reuse sequence id"
-		deferred = RemoteResultDeferred(self, sequid, _name)
-		self._deferreds[sequid] = (deferred, _name)
-		self.send_msgpack(msg)
-		return deferred
+
+		return self.process_call_and_prepare_deferred(sequid, _name, msg)
 
 	@ValidateConnection
 	def _call_with_streams(self, _name, *args, **kwargs): # same for _stream_with_streams, copy
-		assert isinstance(_name, unicode), type(_name)
+		assert isinstance(_name, str)
 
 		sequid = next(self._sequid)
-
-		def filter_args(args, sequid):
-			for arg_pos, arg in enumerate(args): # only handle positional args for now
-				if isinstance(arg, GeneratorType):
-					self.stream_msgpack_call(sequid, arg_pos, arg)
-					yield Streamable() # (sequid, arg_pos)
-				else:
-					yield arg
-
-		args = tuple(filter_args(args, sequid))
-
+		args = tuple(self.filter_args(args, sequid))
 		logger.debug("calling remote with stream %s(%s) [%s]", _name, args_str(args, kwargs), sequid)
 		msg = (MessageTypes.CALL_WITH_STREAMS, sequid, _name, args, kwargs)
-		assert sequid not in self._deferreds, "Must not reuse sequence id"
-		deferred = RemoteResultDeferred(self, sequid, _name)
-		self._deferreds[sequid] = (deferred, _name)
-		self.send_msgpack(msg)
-		return deferred
+
+		return self.process_call_and_prepare_deferred(sequid, _name, msg)
 
 	@ValidateConnection
 	def _callmethod(self, _objectid, _name, *args, **kwargs):
+		assert isinstance(_name, str)
+
 		sequid = next(self._sequid)
 		logger.debug("calling remote method [%s].%s(%s) [%s]", _objectid, _name, args_str(args, kwargs), sequid)
 		msg = (MessageTypes.CALLMETHOD, sequid, _objectid, _name, args, kwargs)
-		assert sequid not in self._deferreds, "Must not reuse sequence id"
-		deferred = RemoteResultDeferred(self, sequid, _name)
-		self._deferreds[sequid] = (deferred, _name)
+
+		return self.process_call_and_prepare_deferred(sequid, _name, msg)
+
+	@ValidateConnection
+	def _callmethod_with_streams(self, _objectid, _name, *args, **kwargs):
+		assert isinstance(_name, str)
+
+		sequid = next(self._sequid)
+		args = tuple(self.filter_args(args, sequid))
+		logger.debug("calling remote method with stream [%s].%s(%s) [%s]", _objectid, _name, args_str(args, kwargs), sequid)
+		msg = (MessageTypes.CALLMETHOD_WITH_STREAMS, sequid, _objectid, _name, args, kwargs)
+
+		return self.process_call_and_prepare_deferred(sequid, _name, msg)
+
+	@ValidateConnection
+	def _callmethod_by_result(self, prev_sequid, _name, *args, **kwargs):
+		assert isinstance(_name, str)
+
+		sequid = next(self._sequid)
+		logger.debug("calling remote method on result [%s].%s(%s) [%s]", prev_sequid, _name, args_str(args, kwargs), sequid)
+		msg = (MessageTypes.CALLMETHOD_BY_RESULT, sequid, prev_sequid, _name, args, kwargs)
+
+		return self.process_call_and_prepare_deferred(sequid, _name, msg)
+
+	@ValidateConnection
+	def _callmethod_by_result_with_streams(self, prev_sequid, _name, *args, **kwargs):
+		assert isinstance(_name, str)
+
+		sequid = next(self._sequid)
+		args = tuple(self.filter_args(args, sequid))
+		logger.debug("calling remote method on result with stream [%s].%s(%s) [%s]", prev_sequid, _name, args_str(args, kwargs), sequid)
+		msg = (MessageTypes.CALLMETHOD_BY_RESULT_WITH_STREAMS, sequid, prev_sequid, _name, args, kwargs)
+
+		return self.process_call_and_prepare_deferred(sequid, _name, msg)
+
+	# helper for all kind of calls which return non-streaming results
+	def process_stream_and_prepare_deferred(self, sequid, _name, msg):
+		assert sequid not in self._multideferreds, "Must not reuse sequence id"
+		deferred = MultiDeferredIterator(self, sequid, _name)
+		self._multideferreds[sequid] = (deferred, _name)
 		self.send_msgpack(msg)
 		return deferred
 
 	@ValidateConnection
-	def _callmethod_with_streams(self, _objectid, _name, *args, **kwargs):
-		raise NotImplementedError()
-
-	@ValidateConnection
 	def _stream(self, _name, *args, **kwargs):
-		assert isinstance(_name, unicode), type(_name)
+		assert isinstance(_name, str)
 
 		sequid = next(self._sequid)
 		logger.debug("requesting stream from remote %s(%s) [%s]", _name, args_str(args, kwargs), sequid)
 		msg = (MessageTypes.CALL, sequid, _name, args, kwargs)
-		assert sequid not in self._multideferreds, "Must not reuse sequence id"
-		deferred = MultiDeferredIterator()
-		self._multideferreds[sequid] = (deferred, _name)
-		self.send_msgpack(msg)
-		return deferred
+
+		return self.process_stream_and_prepare_deferred(sequid, _name, msg)
 
 	@ValidateConnection
 	def _streammethod(self, _objectid, _name, *args, **kwargs):
-		assert isinstance(_name, unicode), type(_name)
+		assert isinstance(_name, str)
 
 		sequid = next(self._sequid)
 		logger.debug("requesting stream from remote method [%s].%s(%s) [%s]", _objectid, _name, args_str(args, kwargs), sequid)
 		msg = (MessageTypes.CALLMETHOD, sequid, _objectid, _name, args, kwargs)
-		assert sequid not in self._multideferreds, "Must not reuse sequence id"
-		deferred = MultiDeferredIterator()
-		self._multideferreds[sequid] = (deferred, _name)
-		self.send_msgpack(msg)
-		return deferred
+
+		return self.process_stream_and_prepare_deferred(sequid, _name, msg)
 
 	@ValidateConnection
-	def _callmethod_onresult(self, prev_sequid, _name, *args, **kwargs):
+	def _streammethod_by_result(self, prev_sequid, _name, *args, **kwargs):
+		assert isinstance(_name, str)
 
 		sequid = next(self._sequid)
-		logger.debug("calling remote method on result [%s].%s(%s) [%s]", prev_sequid, _name, args_str(args, kwargs), sequid)
-		msg = (MessageTypes.CALLMETHOD_ON_RESULT, sequid, prev_sequid, _name, args, kwargs)
-		assert sequid not in self._deferreds, "Must not reuse sequence id"
-		deferred = RemoteResultDeferred(self, sequid, _name)
-		self._deferreds[sequid] = (deferred, _name)
-		self.send_msgpack(msg)
-		return deferred
+		logger.debug("requesting stream from remote method on result [%s].%s(%s) [%s]", prev_sequid, _name, args_str(args, kwargs), sequid)
+		msg = (MessageTypes.CALLMETHOD_BY_RESULT, sequid, prev_sequid, _name, args, kwargs)
+
+		return self.process_stream_and_prepare_deferred(sequid, _name, msg)
+
+	# _stream_with_streams
+	# _streammethod_with_streams
+	# _streammethod_by_result_with_streams
 
 	@ValidateConnection
 	def _delinstance(self, objectid):
@@ -1019,9 +1204,21 @@ class RPCBase(RPCProtocolBase):
 		self.send_msgpack(msg)
 
 	@ValidateConnection
-	def _delinstance_onresult(self, sequid):
+	def _delinstance_by_result(self, sequid):
 		logger.debug("deleting remote result [%s]", sequid)
-		msg = (MessageTypes.DELINSTANCE_ON_RESULT, sequid)
+		msg = (MessageTypes.DELINSTANCE_BY_RESULT, sequid)
+		self.send_msgpack(msg)
+
+	@ValidateConnection
+	def _cancel_call(self, sequid):
+		logger.debug("canceling call [%s]", sequid)
+		msg = (MessageTypes.CANCEL_CALL, sequid)
+		self.send_msgpack(msg)
+
+	@ValidateConnection
+	def _cancel_stream(self, sequid):
+		logger.debug("canceling stream [%s]", sequid)
+		msg = (MessageTypes.CANCEL_STREAM, sequid)
 		self.send_msgpack(msg)
 
 	def _soft_disconnect(self):
@@ -1062,6 +1259,17 @@ class RPCBase(RPCProtocolBase):
 			self._soft_disconnect()
 		"""
 
+	# unused so far, could be used for unencrypted connections
+	def check_token(self, token)
+		try:
+			name = self.friends.identify(token)
+		except UnknownPeer:
+			logger.warning("Connection denied (not in friends list)")
+			logger.info("Unknown token: %s", token)
+			self._soft_disconnect()
+			return
+		self.authenticate(name, peer_pubkey)
+
 	### Callbacks
 
 	def connection_made(self): # todo: use host and port as args?
@@ -1071,12 +1279,13 @@ class RPCBase(RPCProtocolBase):
 
 	def connection_open(self): # might be called multiple time
 		#self.check_certificate()
-		self.service._OnConnect() #use RemoteObject(self) as argument?
+		self.service._OnConnect() # use RemoteObject(self) as argument?
 		logger.debug("Connection to %s established", self.addr)
-		self.tp.send_data(b"") #because there is no SSLconnectionMade function. well there is now!
+		self.tp.send_data(b"") # Because there is no SSLconnectionMade function. Well there is now!
+		#send token here if the connection is not encrypted
 
 	def connection_lost(self, reason):
-		self.service._OnDisconnect() #use RemoteObject(self) as argument?
+		self.service._OnDisconnect() # use RemoteObject(self) as argument?
 
 		if self.authed:
 			if reason.check(error.ConnectionDone):
@@ -1087,7 +1296,7 @@ class RPCBase(RPCProtocolBase):
 			self.authed = False
 			self.friends.reset_connection(self.name, RemoteObject(self))
 
-			self.service._deleteAllObjects(self.connid) # makes use by other peers impossible
+			self.service._delete_all_objects(self.connid) # makes use by other peers impossible
 
 			logger.debug("%s outstanding requests, %s streams", len(self._deferreds), len(self._multideferreds))
 
@@ -1114,7 +1323,7 @@ class RPCBase(RPCProtocolBase):
 				self.recv_msgpack(msg)
 			except msgpack.exceptions.UnpackException: # Deprecated. Use Exception instead.
 				logger.exception("msgpack loading error") # should be logger.warning
-		elif self.name is None and data == b"": #because there is no SSLconnectionMade function. well in twisted 16.4.0+ there is: handshakeCompleted
+		elif self.name is None and data == b"": # because there is no SSLconnectionMade function. well in twisted 16.4.0+ there is: handshakeCompleted
 			self.check_certificate()
 		else:
 			if not data:

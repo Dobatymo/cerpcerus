@@ -1,0 +1,4 @@
+future
+twisted
+msgpack-python
+pyOpenSSL

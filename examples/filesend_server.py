@@ -7,6 +7,8 @@ from io import open
 import cerpcerus
 from cerpcerus.rpcbase import RPCUserError
 
+from utils import randblob
+
 def scandir_rec(path):
 	for direntry in os.scandir(path):
 		if direntry.is_dir():
@@ -14,13 +16,15 @@ def scandir_rec(path):
 		elif direntry.is_file():
 			yield direntry
 
+randomdata = randblob(1024*1024) # 16MB
+
 class TestService(cerpcerus.rpc.DebugService):
 	def __init__(self, reactor, conn):
 		cerpcerus.rpc.DebugService.__init__(self, True)
 		self.shared = Path("D:/PUBLIC").resolve(strict=True) # needs to be absolute, existing path
 
 	def list(self):
-		return tuple((Path(direntry).relative_to(self.shared).path, direntry.stat().st_size) for direntry in scandir_rec(self.shared))
+		return tuple((str(Path(direntry).relative_to(self.shared)), direntry.stat().st_size) for direntry in scandir_rec(self.shared))
 
 	def file(self, relpath, seek=0):
 		try:
@@ -43,6 +47,10 @@ class TestService(cerpcerus.rpc.DebugService):
 					yield data
 		except OSError:
 			raise RPCUserError("Invalid file")
+
+	def infinite(self):
+		while True:
+			yield randomdata
 
 class MySSLContextFactory(cerpcerus.GenericRPCSSLContextFactory):
 

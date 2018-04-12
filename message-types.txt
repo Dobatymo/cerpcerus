@@ -1,0 +1,106 @@
+-- RPC message type --
+
+total messages: 3*2 + 3*2 + 2 + 3 + 6 = 23
+
+guidelines:
+	don't create new client-to-server messages based on return value
+		sometimes different api client functions might be needed, but the same messages should be used
+
+	distinguish based on sent information, so that messages can be handled by server quickly and easily
+		_with_streams would not be strictly necessary, but it increases performance if the server does not have to find out
+		if any of the arguments are streams and need to be handles differently
+
+	tldr:
+		make client-to-server and server-to-client messages orthogonal
+
+# Client to server, no response, errors are ignored silently
+
+NOTIFY:
+	function call
+
+NOTIFYMETHOD
+	method call on OBJECT 
+
+NOTIFYMETHOD_BY_RESULT
+	method call on OBJECT, referred to by RESULT
+
+*_WITH_STREAMS # not implemented for all methods yet
+	arguments can contain `Streamables`
+	separate messages for performance reasons
+	could be implemented as another parameter in request. eg.
+	client could send 0, 1, 2:
+		0: auto, server has to figure out if streams are included
+		1: client says there are no streams
+		2: client says there are streams
+    actually 0 is not neccessary as the work done would be the same as 2. "no streams" is just a performance optimisation
+
+# Client to server, return values are
+- RESULT, OBJECT, ERROR
+- STREAM_RESULT, STREAM_END, STREAM_ERROR
+
+CALL
+	function call
+
+CALLMETHOD
+	method call on OBJECT 
+
+CALLMETHOD_BY_RESULT
+	method call on OBJECT, referred to by RESULT
+
+*_WITH_STREAMS # not implemented for all methods yet
+	arguments can contain `Streamables`
+	separate messages for performance reasons
+
+# Client to server, no response, errors are ignored silently
+
+DELINSTANCE # should be DELOBJECT for symmetry?
+	deletes remote OBJECT
+
+DELINSTANCE_BY_RESULT
+	deletes remote OBJECT, referred to by RESULT
+
+# Client to server, streams, only indirectly user initiated
+
+STREAM_ARGUMENT
+	used with the *_WITH_STREAMS messages to deliver data
+
+ARGUMENT_ERROR
+	used with the *_WITH_STREAMS messages to signal errors
+
+ARGUMENT_END
+	used with the *_WITH_STREAMS messages to mark the end of a stream
+
+# Server to client
+
+RESULT
+	normal value, i.e. no `ObjectId` or `GeneratorType` which are handled separately
+	can send *METHOD_BY_RESULT messages using this return type
+
+OBJECT
+	object instance
+	can send *METHOD messages using this return type
+
+ERROR
+	signals an error, possible errors are
+	- GeneralError
+	- NoSuchFunction
+	- WrongArguments
+	- UserError
+	- NoService
+	- Deferred
+	- InvalidObject
+	- ResourceExhausted
+
+# Server to client, streams, only indirectly user initiated
+
+STREAM_RESULT
+	stream value, basically an iterable result
+
+STREAM_ERROR
+	signals error during stream
+
+STREAM_END
+	marks the end of a stream
+
+# Notes
+"STREAM" messages are not needed, but the client needs to call special `_stream*` functions on the library so the returned STREAM_* messages can be handles correctly

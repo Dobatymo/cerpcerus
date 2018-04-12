@@ -210,6 +210,17 @@ def IProtocolConnector(transport, protocol):
 	"""
 	transport: not a twisted transport, but a protocol
 	protocol: not a twisted protocol but any class (e.g. RPCBase)
+	
+	this is needed because RPCBase cannot inherit from user defined class. But if different protocols
+		are to be supported, there needs to be a way to connect the twisted protcol callbacks.
+	
+	btw:
+	def asd(protcol_class):
+		class rpc_class(protcol_class):
+			pass
+		return rpc_class
+	a = asd()
+	that works...
 	"""
 	transport.recv_data = protocol.recv_data
 	transport.connection_made = protocol.connection_made
