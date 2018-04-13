@@ -1260,7 +1260,7 @@ class RPCBase(RPCProtocolBase):
 		"""
 
 	# unused so far, could be used for unencrypted connections
-	def check_token(self, token)
+	def check_token(self, token):
 		try:
 			name = self.friends.identify(token)
 		except UnknownPeer:

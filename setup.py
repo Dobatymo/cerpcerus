@@ -22,6 +22,6 @@ setup(name="cerpcerus",
 		"pyOpenSSL",
 		"funcsigs;python_version<'3.3'"],
 	extras_require=extras,
-	use_2to3=True,
+	use_2to3=False,
 	zip_safe=True
 )
