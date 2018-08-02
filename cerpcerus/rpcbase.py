@@ -35,10 +35,10 @@ class RPCError(Exception):
 	"""Signals a general RPC error"""
 
 class NetworkError(Exception):
-	"""Signals a general rpc network error"""
+	"""Signals a general RPC network error"""
 
 class ConnectionLost(NetworkError):
-	"""Raised when the rpc connection is lost or closed"""
+	"""Raised when the RPC connection is lost or closed"""
 
 class UnknownPeer(Exception):
 	"""Raised by Friends if peer name is not known"""
@@ -105,7 +105,7 @@ class SameFriend(IFriends):
 class AllFriends(IFriends):
 
 	"""Simple implementation of IFriends interface.
-	Assigns a unique number as name for every key.
+	Assigns a unique number as name for every key. Thus it accepts every key as friend.
 	"""
 
 	def __init__(self):
@@ -136,7 +136,8 @@ except ImportError: # python < 3.3
 
 class Streamable(Generator):
 
-	def close(self): # called when iteration is not finished, so resources can be cleaned up
+	def close(self):
+		""" called when iteration is not finished, so resources can be cleaned up """
 		pass
 
 	def send(self, value):
@@ -148,7 +149,8 @@ class Streamable(Generator):
 	def __iter__(self):
 		return self
 
-	def __next__(self): # returns a piece of data
+	def __next__(self):
+		""" returns a piece of data """
 		raise NotImplementedError()
 
 	def __repr__(self):
@@ -192,6 +194,8 @@ class PushProducerRoundRobin(object):
 from twisted.internet.threads import deferToThread
 class file_sender(object):
 
+	""" can be returned from service methods to asynchronously stream files """
+
 	def __init__(self, path, buffer=1024*1024):
 		self.fp = open(path, "rb")
 		self.buffer = buffer
@@ -212,7 +216,7 @@ class file_sender(object):
 
 	next = __next__ # py2
 
-class RPCPullProducer:
+class RPCPullProducer(object):
 
 	"""
 	it should be able to use this producer on both sides.
@@ -241,13 +245,17 @@ class RPCPullProducer:
 	StreamableID = 0x06
 
 	def default(self, obj):
+		""" converts `RemoteInstance` and `Streamable` to msgpack types """
+
 		if isinstance(obj, RemoteInstance):
 			return msgpack.ExtType(self.RemoteInstanceID, msgpack.dumps(obj.__getstate__(), use_bin_type=True, encoding="utf-8"))
 		elif isinstance(obj, Streamable):
 			return msgpack.ExtType(self.StreamableID, b"")
 		return obj
 
-	def add(self, senders, iterable): # called from RPC
+	def add(self, senders, iterable):
+		""" called from RPC """
+
 		if self.closed:
 			raise ConnectionClosedError("No new streams can be added")
 
@@ -291,10 +299,14 @@ class RPCPullProducer:
 
 	# overwrite
 
-	def _add(self, senders, iterable): # called from add()
+	def _add(self, senders, iterable):
+		"""should be overwritten. called from `add()` """
+
 		raise NotImplementedError
 
-	def resumeProducing(self): # to be called from consumer
+	def resumeProducing(self):
+		"""should be overwritten. called from consumer """
+
 		raise NotImplementedError
 
 	def stopProducing(self):
@@ -309,9 +321,9 @@ class RPCPullProducer:
 class PullProducerQueue(RPCPullProducer):
 
 	"""
-	accepts blobs and streamables which return blobs or deferreds.
-	directly write blobs to consumer
-	streamables are iterated and send when requested
+	implementation of a `RPCPullProducer`.
+	accepts iterables which return blobs or deferreds.
+	iterables are iterated and sent when requested
 		blobs are written to consumer instantly.
 		deferreds will have write callbacks added and execution is given up until result is ready.
 	"""
@@ -340,6 +352,9 @@ class PullProducerQueue(RPCPullProducer):
 		# stop on error?
 
 	def cancel(self, sequid):
+
+		""" cancel stream. interrupts active stream or removes inactive stream from queue """
+
 		raise NotImplementedError("Cannot cancel streams in queue yet...")
 
 		# first try to stop currently active iterable
@@ -348,16 +363,22 @@ class PullProducerQueue(RPCPullProducer):
 			self.current = None
 			send_error(RPCBase.ERRORS.Cancelled)
 			return
-		
+
 		# next, remove item from queue
 		pass
 		return
-		
+
 		# last
 		# sequid not found, call probably already completed or sequid was invalid in the first place
 		logger.debug("Tried to cancel invalid stream [%s]", sequid) # fixme: is .debug() here correct?
 
 	def resumeProducing(self):
+
+		""" handles currently active iterable (send data, error or finalize current stream)
+			or retrieves a new iterable from queue.
+			If the queue is empty, it unregisters from consumer.
+		"""
+
 		try:
 			if not self.current:
 				self.current = self.queue.get_nowait()
@@ -431,6 +452,9 @@ class RPCProtocolBase(object):
 
 #Decorator to avoid copy&paste
 def ValidateConnection(func):
+
+	""" decorator which raises `NotAuthenticated` if the connection is not in a valid state """
+
 	def check(self, *args, **kwargs):
 		if self.authed:
 			return func(self, *args, **kwargs)
@@ -494,6 +518,8 @@ class RPCBase(RPCProtocolBase):
 	connids = Seq(0)
 
 	def __init__(self, friends, transport_protocol):
+		#type: (IFriends, ) -> None
+
 		self.connid = next(self.connids)
 		self._sequid = Seq(0) #was static/class var before
 		self.friends = friends
@@ -526,6 +552,7 @@ class RPCBase(RPCProtocolBase):
 	### overwrite
 
 	def authenticated(self, key):
+		""" Called wth `key` if connection is authenticated. To be overwritten. """
 		pass
 
 	### msgpack hooks

@@ -17,17 +17,23 @@ if TYPE_CHECKING:
 	from typing import Any, Optional
 	from twisted.internet import ssl
 	from twisted.internet.defer import Deferred
-
+	from .rpc import ServiceFactory, Service
+	from .rpcbase import IFriends
 
 logger = logging.getLogger(__name__)
 
 class RPCClient(RPCBase):
 	"""Client specialisation of RPCBase"""
+
 	def __init__(self, friends, transport_protocol, deferred=None):
+		# type: (IFriends, Any, Optional[Deferred]) -> None
+
 		RPCBase.__init__(self, friends, transport_protocol)
 		self.deferred = deferred
 
 	def authenticated(self, pubkey):
+		#type: (bytes, ) -> None
+
 		self.friends.establish_connection(self.name, RemoteObject(self)) # overwrites existing connection
 		self.friends.reset_connecting(self.name, self.deferred)
 		if self.deferred:
@@ -36,6 +42,8 @@ class RPCClient(RPCBase):
 class RPCClientFactory(ClientFactory):
 	"""Factory needed for Twisted. Uses a service factory to present a service to peers"""
 	def __init__(self, friends, service_factory, transport_protocol_factory, name):
+		# type: (IFriends, ServiceFactory, Factory, str) -> None
+
 		self.friends = friends
 		self.service_factory = service_factory
 		self.transport_protocol_factory = transport_protocol_factory
@@ -44,6 +52,8 @@ class RPCClientFactory(ClientFactory):
 
 	@property
 	def deferred(self):
+		# type: () -> Deferred
+
 		"""Get the authentication deferred."""
 		return self.auth_d
 
@@ -85,7 +95,7 @@ class RPCClientFactory(ClientFactory):
 		return transport_protocol
 
 def Client(reactor, host, port, name, ssl_context, service=None, friends=None, transport_protocol_factory=None):
-	# type: (Any, str, int, str, ssl.ContextFactory, Optional[Service], Optional[Friends], Optional[Factory]) -> Deferred
+	# type: (Any, str, int, str, ssl.ContextFactory, Optional[Service], Optional[IFriends], Optional[Factory]) -> Deferred
 
 	"""Connects to `host`:`port`, and uses `name` as identifier for this connection.
 	reactor: twisted reactor object

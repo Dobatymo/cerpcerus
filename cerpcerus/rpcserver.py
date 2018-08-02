@@ -15,7 +15,8 @@ from .websocket_protocol import WebSocketServerFactory, WebSocketServerAdapter
 if TYPE_CHECKING:
 	from typing import Any, Optional
 	from twisted.internet import ssl
-
+	from .rpc import ServiceFactory, Service
+	from .rpcbase import IFriends
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +24,16 @@ class RPCServer(RPCBase):
 	"""Server specialisation of RPCBase"""
 
 	def authenticated(self, key):
+		#type: (bytes, ) -> None
+
 		self.friends.set_addr(self.name, self.addr) #bad: sets outgoing instead of incoming  port / overwrites existings addr of possibly currently established connection
 		self.friends.establish_connection(self.name, RemoteObject(self)) # overwrites existings connection
 
 class RPCServerFactory(ServerFactory):
 	"""Factory needed for Twisted. Uses a service factory to present a service to peers"""
 	def __init__(self, friends, service_factory, transport_protocol_factory):
+		# type: (IFriends, ServiceFactory, Factory) -> None
+
 		self.friends = friends
 		self.service_factory = service_factory
 		self.transport_protocol_factory = transport_protocol_factory
@@ -44,7 +49,7 @@ class RPCServerFactory(ServerFactory):
 		return transport_protocol
 
 def Server(reactor, port, ssl_context_factory, service=None, friends=None, transport_protocol_factory=None, interface="", backlog=None):
-	# type: (Any, int, ssl.ContextFactory, Optional[Service], Optional[Friends], Optional[Factory], str, Optional[int]) -> ssl.Port
+	# type: (Any, int, ssl.ContextFactory, Optional[Service], Optional[IFriends], Optional[Factory], str, Optional[int]) -> ssl.Port
 
 	"""Starts rpc server on `port` on `interface`.
 	reactor: Twisted reactor object

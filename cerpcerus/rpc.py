@@ -3,6 +3,7 @@ from builtins import str
 
 from future.utils import iteritems
 
+import logging
 from functools import partial
 from itertools import chain
 from abc import abstractmethod
@@ -17,8 +18,7 @@ from . import __modulename__
 
 #pylint: disable=protected-access
 
-import logging # debug
-logger = logging.getLogger(__name__) # debug
+logger = logging.getLogger(__name__)
 
 """
 todo: take care when remote objects are destroyed... __del__
@@ -513,7 +513,7 @@ class SubServicesWithDefault(SubServices): #how will _callSubService be called? 
 	_call = Service._call #does this work?
 """
 
-class ServiceFactory:
+class ServiceFactory(object):
 	"""Baseclass for Service factories"""
 
 	def build(self, *args, **kwargs):
