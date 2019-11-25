@@ -1,13 +1,14 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 from builtins import str
 
-from future.utils import iteritems
+from future.utils import viewitems
 
 import logging
 from functools import partial
 from itertools import chain
 from abc import abstractmethod
 import inspect, warnings
+from typing import TYPE_CHECKING
 try:
 	from inspect import signature #py3.3+
 except ImportError:
@@ -15,6 +16,10 @@ except ImportError:
 
 from .utils import cast, Seq, log_methodcall_decorator # decorator only needed for development
 from . import __modulename__
+
+if TYPE_CHECKING:
+	from typing import Any
+	from .iter_deferred import RemoteResultDeferred, MultiDeferredIterator
 
 #pylint: disable=protected-access
 
@@ -452,7 +457,7 @@ class Service(object):
 	def _delete_all_objects(self, connid):
 		"""Deletes all objects created by this connection."""
 		try:
-			self._objects = {oid: (obj, connid_) for oid, (obj, connid_) in iteritems(self._objects) if connid_ != connid}
+			self._objects = {oid: (obj, connid_) for oid, (obj, connid_) in viewitems(self._objects) if connid_ != connid}
 		except AttributeError:
 			logger.exception("Maybe '%s.Service.__init__' was not called within service", __modulename__)
 
@@ -558,7 +563,7 @@ class SeparatedService(ServiceFactory):
 		self.kwargs = kwargs
 
 	def build(self, *args, **kwargs):
-		return self.service(*(self.args + args), **dict(chain(iteritems(self.kwargs), iteritems(kwargs)))) #change order?
+		return self.service(*(self.args + args), **dict(chain(viewitems(self.kwargs), viewitems(kwargs)))) #change order?
 
 """class SeperatedSubServices(SeperatedService):
 	services = {}
@@ -570,6 +575,6 @@ class SeparatedService(ServiceFactory):
 
 	def build(self, *args, **kwargs):
 		service = SeperatedService.build(*args, **kwargs)
-		for name, service in iteritems(self.services):
+		for name, service in viewitems(self.services):
 			service._AddService(service, name)
 """

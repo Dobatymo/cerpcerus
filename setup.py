@@ -5,20 +5,18 @@ extras = {
 	"twisted warning": ["service_identity"]
 }
 
-# msgpack-python 0.4.2: exceptions.MemoryError
-
 setup(name="cerpcerus",
 	version="0.2",
 	description="Symmetrical, Secure RPC for Python",
 	url="https://github.com/Dobatymo/cerpcerus",
-	author="Hazzard",
+	author="Dobatymo",
 	license="GPL",
 	packages=["cerpcerus"],
 	test_suite="test",
 	install_requires=[
 		"future",
 		"twisted",
-		"msgpack-python",
+		"msgpack>=0.6.0",
 		"pyOpenSSL",
 		"funcsigs;python_version<'3.3'"],
 	extras_require=extras,

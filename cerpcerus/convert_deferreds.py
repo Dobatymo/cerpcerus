@@ -2,7 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import logging
 from builtins import zip
-from future.utils import iterkeys
+from future.utils import viewkeys
 
 from twisted.internet import defer
 
@@ -48,13 +48,13 @@ def DeferredDict(dct):
 
 	def success(result):
 		successes, values = zip(*result)
-		return dict(zip(iterkeys(dct), values))
+		return dict(zip(viewkeys(dct), values))
 	
 	def failure(failure):
 		raise Exception("what to do?")
 
 	if dct:
-		deferred = defer.DeferredList(dct.values())
+		deferred = defer.DeferredList(dct.values()) # viewvalues or listvalues?
 		deferred.addCallbacks(success, failure)
 		return deferred
 	

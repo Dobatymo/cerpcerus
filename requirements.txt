@@ -1,4 +1,4 @@
 future
 twisted
-msgpack-python
+msgpack
 pyOpenSSL

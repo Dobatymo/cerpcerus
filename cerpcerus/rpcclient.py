@@ -32,7 +32,7 @@ class RPCClient(RPCBase):
 		self.deferred = deferred
 
 	def authenticated(self, pubkey):
-		#type: (bytes, ) -> None
+		# type: (bytes, ) -> None
 
 		self.friends.establish_connection(self.name, RemoteObject(self)) # overwrites existing connection
 		self.friends.reset_connecting(self.name, self.deferred)

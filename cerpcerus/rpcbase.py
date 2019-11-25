@@ -248,7 +248,7 @@ class RPCPullProducer(object):
 		""" converts `RemoteInstance` and `Streamable` to msgpack types """
 
 		if isinstance(obj, RemoteInstance):
-			return msgpack.ExtType(self.RemoteInstanceID, msgpack.dumps(obj.__getstate__(), use_bin_type=True, encoding="utf-8"))
+			return msgpack.ExtType(self.RemoteInstanceID, msgpack.dumps(obj.__getstate__(), use_bin_type=True))
 		elif isinstance(obj, Streamable):
 			return msgpack.ExtType(self.StreamableID, b"")
 		return obj
@@ -518,7 +518,7 @@ class RPCBase(RPCProtocolBase):
 	connids = Seq(0)
 
 	def __init__(self, friends, transport_protocol):
-		#type: (IFriends, ) -> None
+		# type: (IFriends, ) -> None
 
 		self.connid = next(self.connids)
 		self._sequid = Seq(0) #was static/class var before
@@ -562,7 +562,7 @@ class RPCBase(RPCProtocolBase):
 
 	def ext_hook(self, n, obj):
 		if n == self.RemoteInstanceID:
-			objectid, classname = msgpack.loads(obj, use_list=False, encoding="utf-8")
+			objectid, classname = msgpack.loads(obj, use_list=False, raw=False)
 			return RemoteInstance(self, objectid, classname)
 		elif n == self.StreamableID:
 			return Streamable()
@@ -570,8 +570,7 @@ class RPCBase(RPCProtocolBase):
 
 	# argument conversion for streams
 
-	@staticmethod
-	def filter_args(args, sequid):
+	def filter_args(self, args, sequid):
 		for arg_pos, arg in enumerate(args): # only handle positional args for now
 			if isinstance(arg, GeneratorType):
 				self.stream_msgpack_call(sequid, arg_pos, arg)
@@ -579,8 +578,7 @@ class RPCBase(RPCProtocolBase):
 			else:
 				yield arg
 
-	@staticmethod
-	def defilter_args(sequid, name, args):
+	def defilter_args(self, sequid, name, args):
 		""" this could be put in msgpack custom unpacking also.
 			but this would require sending the sequid and argument position.
 			does not handles keyword arguments right now.
@@ -1267,7 +1265,7 @@ class RPCBase(RPCProtocolBase):
 			logger.warning("Peer did not send a certificate")
 			self._soft_disconnect()
 			return
-		peer_pubkey = crypto.dump_privatekey(crypto.FILETYPE_ASN1, peer_x509.get_pubkey())
+		peer_pubkey = crypto.dump_privatekey(crypto.FILETYPE_ASN1, peer_x509.get_pubkey()) # genutility.tls.get_pubkey_from_x509
 
 		try:
 			name = self.friends.identify(peer_pubkey)
@@ -1295,7 +1293,7 @@ class RPCBase(RPCProtocolBase):
 			logger.info("Unknown token: %s", token)
 			self._soft_disconnect()
 			return
-		self.authenticate(name, peer_pubkey)
+		self.authenticate(name, token)
 
 	### Callbacks
 
@@ -1346,7 +1344,7 @@ class RPCBase(RPCProtocolBase):
 	def recv_data(self, data):
 		if self.name and data:
 			try:
-				msg = msgpack.loads(data, use_list=False, encoding="utf-8", ext_hook=self.ext_hook)
+				msg = msgpack.loads(data, use_list=False, raw=False, ext_hook=self.ext_hook)
 				self.recv_msgpack(msg)
 			except msgpack.exceptions.UnpackException: # Deprecated. Use Exception instead.
 				logger.exception("msgpack loading error") # should be logger.warning

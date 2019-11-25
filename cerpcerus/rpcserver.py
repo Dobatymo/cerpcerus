@@ -24,7 +24,7 @@ class RPCServer(RPCBase):
 	"""Server specialisation of RPCBase"""
 
 	def authenticated(self, key):
-		#type: (bytes, ) -> None
+		# type: (bytes, ) -> None
 
 		self.friends.set_addr(self.name, self.addr) #bad: sets outgoing instead of incoming  port / overwrites existings addr of possibly currently established connection
 		self.friends.establish_connection(self.name, RemoteObject(self)) # overwrites existings connection

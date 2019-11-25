@@ -1,12 +1,15 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from builtins import zip, range
+
 from functools import partial, wraps
 from collections import OrderedDict
 from typing import TYPE_CHECKING
 
-from builtins import zip, range, map
+from genutility.object import cast
 
 if TYPE_CHECKING:
+	from typing import Iterable
 	from OpenSSL.crypto import X509
 	from twisted.internet.base import ReactorBase, DelayedCall
 
@@ -41,16 +44,6 @@ def partial_decorator(*args, **kwargs):
 	def decorator(func):
 		return partial(func, *args, **kwargs)
 	return decorator
-
-def cast(_object, _class, _instanceof=object, *args, **kwargs):
-	"""Changes the class of '_object' to '_class' if '_object' is an instance of '_instanceof', calls the constructor and returns it"""
-	_object = copy.copy(_object)
-	if isinstance(_object, _instanceof):
-		_object.__class__ = _class
-		_object.__init__(*args, **kwargs)
-	else:
-		raise TypeError("Object is not an instance of {}".format(_instanceof.__name__))
-	return _object
 
 class IPAddr(object):
 	"""Simple class which containts IP and port"""

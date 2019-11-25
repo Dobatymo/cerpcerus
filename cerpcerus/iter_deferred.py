@@ -181,7 +181,7 @@ def main2(): # connect with telnet
 	from twisted.internet import task
 	mdit = MultiDeferredIterator()
 	reactor.listenTCP(8000, RecvFactory(mdit))
-	task.react(lambda reactor: defer.ensureDeferred(async_recv_stream(mdit)))
+	task.react(lambda reactor: defer.ensureDeferred(async_recv_stream(mdit))) # python 3 only
 	reactor.run()
 
 if __name__ == "__main__":
