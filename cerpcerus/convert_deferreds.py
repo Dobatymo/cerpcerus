@@ -1,12 +1,11 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import logging
 from builtins import zip
 from future.utils import viewkeys
+import logging
 
 from twisted.internet import defer
-
-from .utils import args_str
+from genutility.debug import args_str
 
 logger = logging.getLogger(__name__)
 

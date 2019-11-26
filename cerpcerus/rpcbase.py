@@ -9,8 +9,9 @@ from functools import partial
 import msgpack
 from OpenSSL import SSL, crypto, __version__ as pyopenssl_version
 from twisted.internet import ssl, defer, error
+from genutility.debug import args_str
 
-from .utils import cert_info, args_str, Seq, IPAddr
+from .utils import cert_info, Seq, IPAddr
 from .rpc import RemoteObject, RemoteInstance, RemoteResult, RPCAttributeError, RPCInvalidArguments, RPCInvalidObject, NotAuthenticated, ObjectId
 from .iter_deferred import MultiDeferredIterator
 
@@ -426,7 +427,7 @@ class RemoteResultDeferred(defer.Deferred, RemoteResult):
 
 	def abort(self):
 		# should this method be called `cancel`? Deferred.cancel already exists and is called by timeout for example.
-		"""cancels the remote call. will only work if the server using a queuing system,
+		""" Cancels the remote call. Will only work if the server using a queuing system,
 			threads or the like for deferreds and the abort call is processed
 			before the call in the queue. """
 
@@ -450,8 +451,9 @@ class RPCProtocolBase(object):
 		"""Receive packet with binary data"""
 		raise NotImplementedError("recv_data(self, data)")
 
-#Decorator to avoid copy&paste
+# Decorator to avoid copy&paste
 def ValidateConnection(func):
+	# type: (Callable, ) -> Callable
 
 	""" decorator which raises `NotAuthenticated` if the connection is not in a valid state """
 

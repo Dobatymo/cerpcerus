@@ -14,7 +14,9 @@ try:
 except ImportError:
 	from funcsigs import signature #backport
 
-from .utils import cast, Seq, log_methodcall_decorator # decorator only needed for development
+from genutility.debug import log_methodcall
+
+from .utils import cast, Seq
 from . import __modulename__
 
 if TYPE_CHECKING:
@@ -234,7 +236,7 @@ class RemoteInstance(RemoteObjectGeneric):
 		""" restore the remote instance, assuming there already is the correct underlying connection """
 		self._objectid, self._classname = state
 
-	@log_methodcall_decorator
+	@log_methodcall
 	def __del__(self): # called when garbage collected
 		# RemoteObjectGeneric.__del__() # should be called, but doesn't exist
 		try:
@@ -273,7 +275,7 @@ class RemoteResult(RemoteObjectGeneric):
 	def __dir__(self):
 		return RemoteObjectGeneric.__dir__(self) + ["_call", "_notify", "_stream", "_sequid", "_classname"]
 
-	@log_methodcall_decorator
+	@log_methodcall
 	def __del__(self): # called when garbage collected
 		# RemoteObjectGeneric.__del__() # should be called, but doesn't exist
 		try:
@@ -378,12 +380,11 @@ class Service(object):
 		return decorator
 
 	def _introspect(self):
-		"""Returns (classes, methods, functions) with signatures.
-		Does not take exposed aliases for private functions into account."""
+		""" Returns (classes, methods, functions) with signatures.
+			Does not take exposed aliases for private functions into account.
+		"""
 
-		"""
-		getargspec() is deprecated for python3, replace with signature
-		"""
+		# fixme: getargspec() is deprecated for python3, replace with signature
 
 		classes = []
 		methods = []
@@ -409,7 +410,8 @@ class Service(object):
 		return (tuple(classes), tuple(methods), tuple(functions))
 
 	def _call(self, _connid, _name, *args, **kwargs):
-		"""Dispatches calls on service based on name and type."""
+		""" Dispatches calls on service based on name and type. """
+
 		if not _name.startswith("_"):
 			try:
 				_name = self._alias.get(_name, _name)
@@ -473,7 +475,7 @@ class Service(object):
 		"""Is called when the connection to the service is closed"""
 		pass
 
-	@log_methodcall_decorator
+	@log_methodcall
 	def __del__(self):
 		pass
 

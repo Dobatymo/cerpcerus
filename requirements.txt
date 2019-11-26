@@ -2,3 +2,4 @@ future
 twisted
 msgpack
 pyOpenSSL
+genutility

@@ -2,11 +2,13 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 from builtins import zip, range
 
-from functools import partial, wraps
+from functools import wraps
 from collections import OrderedDict
 from typing import TYPE_CHECKING
 
 from genutility.object import cast
+from genutility.func import partial_decorator
+from genutility.debug import args_str
 
 if TYPE_CHECKING:
 	from typing import Iterable
@@ -39,11 +41,6 @@ from string import ascii_lowercase
 def random(size, num):
 	for _ in range(num):
 		yield "".join(choice(ascii_lowercase) for _ in range(size))
-
-def partial_decorator(*args, **kwargs):
-	def decorator(func):
-		return partial(func, *args, **kwargs)
-	return decorator
 
 class IPAddr(object):
 	"""Simple class which containts IP and port"""
@@ -87,64 +84,11 @@ class Seq(object):
 
 	next = __next__ # py2
 
-import traceback, logging
-def log_methodcall_decorator(func):
-	@wraps(func)
-	def decorator(self, *args, **kwargs):
-		logging.debug("%s.%s(%s)", self.__class__.__name__, func.__name__, args_str(args, kwargs)) #type(self).__name__ ?
-		#logging.debug(self.__class__.__name__ + "\n" + "\n".join(map(lambda x: " : ".join(map(str, x)), traceback.extract_stack())))
-		return func(self, *args, **kwargs)
-	return decorator
-
-def log_methodcall_result(func):
-	@wraps(func)
-	def decorator(self, *args, **kwargs):
-		logging.debug("%s.%s(%s)", self.__class__.__name__, func.__name__, args_str(args, kwargs)) #type(self).__name__ ?
-		#logging.debug(self.__class__.__name__ + "\n" + "\n".join(map(lambda x: " : ".join(map(str, x)), traceback.extract_stack())))
-		res = func(self, *args, **kwargs)
-		logging.debug("%s.%s => %s", self.__class__.__name__, func.__name__, res) #type(self).__name__ ?
-		return res
-	return decorator
-
 def cert_info(cert):
 	# type: (X509, ) -> str
 	"""user readable certificate information"""
 
 	return "Subject: {}, Issuer: {}, Serial Number: {}, Version: {}".format(cert.get_subject().commonName, cert.get_issuer().commonName, cert.get_serial_number(), cert.get_version())
-
-def args_str(args, kwargs, maxlen=20, app="...", repr_args=True):
-	# type: (tuple, dict, int, str, bool) -> str
-
-	"""creates printable string from callable arguments"""
-
-	def arg_str(arg, repr_args=repr_args):
-		if repr_args:
-			arg = repr(arg)
-		assert isinstance(arg, str)
-		if maxlen:
-			if len(arg) <= maxlen+len(app):
-				return arg
-			else:
-				return arg[:maxlen] + app
-		else:
-			return arg
-
-	def kwarg_str(key, value):
-		return key + "=" + arg_str(value, repr_args=True)
-
-	args = ", ".join(arg_str(arg) for arg in args)
-	kwargs = ", ".join(kwarg_str(k, v) for k, v in kwargs.iteritems())
-
-	if args:
-		if kwargs:
-			return args + ", " + kwargs
-		else:
-			return args
-	else:
-		if kwargs:
-			return kwargs
-		else:
-			return ""
 
 def argspec_str(name, argspec_od):
 	# type: (name, OrderedDict) -> str
