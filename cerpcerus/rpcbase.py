@@ -1,6 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-from builtins import str
 
+from builtins import str
 from future.utils import iteritems
 
 import logging, queue, itertools
@@ -10,6 +10,7 @@ import msgpack
 from OpenSSL import SSL, crypto, __version__ as pyopenssl_version
 from twisted.internet import ssl, defer, error
 from genutility.debug import args_str
+from genutility.tls import get_pubkey_from_x509
 
 from .utils import cert_info, Seq, IPAddr
 from .rpc import RemoteObject, RemoteInstance, RemoteResult, RPCAttributeError, RPCInvalidArguments, RPCInvalidObject, NotAuthenticated, ObjectId
@@ -1267,7 +1268,8 @@ class RPCBase(RPCProtocolBase):
 			logger.warning("Peer did not send a certificate")
 			self._soft_disconnect()
 			return
-		peer_pubkey = crypto.dump_privatekey(crypto.FILETYPE_ASN1, peer_x509.get_pubkey()) # genutility.tls.get_pubkey_from_x509
+
+		peer_pubkey = get_pubkey_from_x509(peer_x509)
 
 		try:
 			name = self.friends.identify(peer_pubkey)

@@ -1,5 +1,10 @@
 future
 twisted
+zope.interface
 msgpack
-pyOpenSSL
+pyOpenSSL # OpenSSL
 genutility
+
+autobahn # optional, for websocket support
+
+funcsigs; python_version < '3'
